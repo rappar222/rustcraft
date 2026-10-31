@@ -1,52 +1,58 @@
-# High-Performance Voxel Engine in Rust (Vulkan)
+# Rustcraft [Vulkan]
 
-An ultra-fast, multithreaded Minecraft-style voxel game engine written from scratch in Rust, utilizing Vulkan via `wgpu`.
+An ultra-fast, multithreaded Minecraft recreation written from scratch in Rust, utilizing Vulkan via `wgpu`.
 
-## Key Performance Features
+## Features
 
-1. **Direct Vulkan Pipeline**:
-   - Vulkan backend (`wgpu::Backends::VULKAN`) with asynchronous compute and transfer capabilities.
-   - Dedicated 2D Texture Array (`texture_2d_array`) with nearest-neighbor sampling eliminating mip-map bleeding and texture atlas seams.
-   - Depth-tested backface culling (`Depth32Float` + `Face::Back`).
+1. **Title Screen & Menus**:
+   * **Starting Menu**: Play World in Survival mode or Creative mode, configure Graphics Settings, or Quit.
+   * **Pause Menu (ESC)**: Seamlessly resume game, switch game mode on the fly between Survival and Creative, tweak settings, or return to title.
+   * **Game Over Screen**: Red vignette overlay with Respawn and Return to Title options.
 
-2. **Multithreaded World Generation & Meshing**:
-   - Terrain generation and 3D cave sculpting running in parallel across all CPU cores via **Rayon**.
-   - Asynchronous chunk meshing with automatic boundary-aware culling.
+2. **Creative & Survival Game Modes**:
+   * **Creative Mode**: Free flight mode (`F` to toggle, `Space` to ascend, `Shift` to descend), instant block placing and breaking, invulnerability.
+   * **Survival Mode**: 10 Heart (20 HP) health system, swept AABB physics with gravity and friction, realistic fall damage when falling from $>3.5$ blocks, and natural regeneration over time.
 
-3. **High-Efficiency Mesh Architecture**:
-   - Face visibility culling: Hidden internal faces between opaque voxels are discarded immediately.
-   - 4-level Smooth Ambient Occlusion (AO) computed per vertex with anisotropic diagonal quad flipping to avoid lighting seams.
-   - Directional sunlight and ambient sky lighting combined in the WGSL shader.
-   - Frustum and distance culling for distant chunks.
+3. **Inventory & Palette System ('E')**:
+   * Press `E` at any time to open the **Creative Inventory & Palette**.
+   * Grid of available blocks (Grass, Dirt, Stone, Cobblestone, Wood, Leaves, Sand, Planks, Glass, Bedrock).
+   * Click any block in the palette to assign it to your active hotbar slot.
+   * Click any hotbar slot (1–9) to change selection.
+   * Press `E` or `ESC` to return to the game.
 
-4. **Player Physics & Voxel Raycasting**:
-   - Continuous swept AABB collision resolution against voxel blocks.
-   - Amanatides-Woo Fast Voxel Traversal algorithm (DDA) for raycasting up to 7 blocks for block breaking and placing.
+4. **Graphics Settings**:
+   * **Render Distance**: Dynamic cycling between 4, 8, 12, and 16 chunks (up to 33x33 = 1,089 chunks).
+   * **Field of View (FOV)**: 60°, 75°, 90°, and 105°.
+   * **Atmospheric Fog**: Toggleable smooth distance fog blending into the sky clear color.
+   * **Vertical Sync (VSync)**: Toggleable between uncapped peak FPS (`AutoNoVsync`) and synchronized refresh (`AutoVsync`).
+
+5. **Graphics & Performance**:
+   * Direct **Vulkan** backend on AMD Radeon 890M Graphics.
+   * 2D Texture Array eliminating texture atlas seams and mip bleeding.
+   * 4-level Smooth Ambient Occlusion with anisotropic quad flipping.
+   * Multithreaded chunk terrain generation and meshing with **Rayon**.
 
 ---
 
 ## Controls
 
-| Key / Action | Action |
+| Key / Mouse | Action |
 |---|---|
 | **W, A, S, D** | Move Forward / Left / Backward / Right |
-| **Space** | Jump (or Fly Up when Flying is enabled) |
-| **Left Shift** | Sneak (or Fly Down when Flying is enabled) |
+| **Space** | Jump (or Fly Up when Flying in Creative) |
+| **Left Shift** | Sneak (or Fly Down in Creative) |
 | **Left Ctrl** | Sprint |
-| **F** | Toggle Flying Mode (Default: ON at spawn) |
-| **1 - 9** | Select block to place (Grass, Dirt, Stone, Cobble, Wood, Leaves, Sand, Planks, Glass) |
-| **Left Mouse Button** | Break block |
-| **Right Mouse Button** | Place selected block |
-| **Escape** | Toggle mouse cursor lock |
+| **F** | Toggle Flying Mode (Creative Mode only) |
+| **1 - 9** | Hotbar slot selection |
+| **E** | Open / Close Inventory & Block Palette |
+| **Escape** | Pause Menu / Close open menu / Unlock Cursor |
+| **Left Click** | Break block (or Click UI buttons/slots) |
+| **Right Click** | Place active block |
 
 ---
 
-## How to Run
+## Running
 
 ```bash
-# Run in development mode
-cargo run
-
-# Run in optimized release mode (maximum FPS)
 cargo run --release
 ```

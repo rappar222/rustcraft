@@ -13,15 +13,13 @@ pub struct PipelineState {
 impl PipelineState {
     pub fn new(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         surface_config: &wgpu::SurfaceConfiguration,
+        texture_manager: &TextureManager,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Voxel Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
-
-        let texture_manager = TextureManager::new(device, queue);
 
         let camera_uniform = CameraUniform {
             view_proj: [0.0; 16],

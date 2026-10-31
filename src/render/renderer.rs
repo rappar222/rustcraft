@@ -1,6 +1,9 @@
 use super::camera::Camera;
 use super::mesher::{ChunkMesh, Mesher};
 use super::pipeline::PipelineState;
+use super::texture::TextureManager;
+use crate::ui::draw::UiBatch;
+use crate::ui::pipeline::UiPipeline;
 use crate::voxel::chunk::{ChunkPos, CHUNK_DEPTH, CHUNK_WIDTH};
 use crate::voxel::world::World;
 use rayon::prelude::*;
@@ -23,6 +26,7 @@ pub struct Renderer {
     pub queue: wgpu::Queue,
     pub config: wgpu::SurfaceConfiguration,
     pub pipeline_state: PipelineState,
+    pub ui_pipeline: UiPipeline,
     pub chunk_meshes: FxHashMap<ChunkPos, GpuChunkMesh>,
 }
 
@@ -77,11 +81,13 @@ impl Renderer {
         let mut config = surface
             .get_default_config(&adapter, width, height)
             .expect("Surface isn't supported by the adapter");
-        config.present_mode = wgpu::PresentMode::AutoNoVsync; // Peak FPS without VSync limit!
+        config.present_mode = wgpu::PresentMode::AutoNoVsync;
 
         surface.configure(&device, &config);
 
-        let pipeline_state = PipelineState::new(&device, &queue, &config);
+        let texture_manager = TextureManager::new(&device, &queue);
+        let pipeline_state = PipelineState::new(&device, &config, &texture_manager);
+        let ui_pipeline = UiPipeline::new(&device, &queue, &config, &texture_manager);
 
         Self {
             window,
@@ -90,8 +96,18 @@ impl Renderer {
             queue,
             config,
             pipeline_state,
+            ui_pipeline,
             chunk_meshes: FxHashMap::default(),
         }
+    }
+
+    pub fn set_vsync(&mut self, vsync: bool) {
+        self.config.present_mode = if vsync {
+            wgpu::PresentMode::AutoVsync
+        } else {
+            wgpu::PresentMode::AutoNoVsync
+        };
+        self.surface.configure(&self.device, &self.config);
     }
 
     pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
@@ -100,11 +116,11 @@ impl Renderer {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
             self.pipeline_state.resize_depth(&self.device, new_size.width, new_size.height);
+            self.ui_pipeline.resize(&self.queue, new_size.width, new_size.height);
         }
     }
 
     pub fn update_dirty_chunks(&mut self, world: &mut World) {
-        // Collect dirty chunks
         let dirty_positions: Vec<ChunkPos> = world
             .chunks
             .iter()
@@ -115,7 +131,6 @@ impl Renderer {
             return;
         }
 
-        // Parallel chunk meshing across all CPU threads via Rayon!
         let new_meshes: Vec<(ChunkPos, ChunkMesh)> = dirty_positions
             .par_iter()
             .map(|&pos| {
@@ -125,7 +140,6 @@ impl Renderer {
             })
             .collect();
 
-        // Upload meshed buffers to Vulkan GPU
         for (pos, mesh) in new_meshes {
             if let Some(chunk) = world.chunks.get_mut(&pos) {
                 chunk.is_dirty = false;
@@ -159,7 +173,14 @@ impl Renderer {
         }
     }
 
-    pub fn render(&mut self, camera: &Camera) -> Result<usize, RenderError> {
+    pub fn render(
+        &mut self,
+        camera: &Camera,
+        view_distance_blocks: f32,
+        fog_enabled: bool,
+        render_3d: bool,
+        ui_batch: &UiBatch,
+    ) -> Result<usize, RenderError> {
         let surface_texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => texture,
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
@@ -171,13 +192,16 @@ impl Renderer {
 
         let view = surface_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Update camera uniform buffer
-        let camera_uniform = camera.to_uniform(160.0);
+        // Update camera uniform
+        let camera_uniform = camera.to_uniform(view_distance_blocks, fog_enabled);
         self.queue.write_buffer(
             &self.pipeline_state.camera_buffer,
             0,
             bytemuck::cast_slice(&[camera_uniform]),
         );
+
+        // Upload UI mesh
+        self.ui_pipeline.update_mesh(&self.device, ui_batch);
 
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Vulkan Render Encoder"),
@@ -189,7 +213,7 @@ impl Renderer {
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Vulkan Voxel Pass"),
+                label: Some("Vulkan Scene & UI Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -217,32 +241,37 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            render_pass.set_pipeline(&self.pipeline_state.render_pipeline);
-            render_pass.set_bind_group(0, &self.pipeline_state.bind_group, &[]);
+            // 1. Render 3D World (if enabled)
+            if render_3d {
+                render_pass.set_pipeline(&self.pipeline_state.render_pipeline);
+                render_pass.set_bind_group(0, &self.pipeline_state.bind_group, &[]);
 
-            for (pos, mesh) in &self.chunk_meshes {
-                // Horizontal chunk culling check (only cull chunks strictly behind camera)
-                let chunk_center_x = (pos.x * CHUNK_WIDTH as i32 + (CHUNK_WIDTH as i32 / 2)) as f32;
-                let chunk_center_z = (pos.z * CHUNK_DEPTH as i32 + (CHUNK_DEPTH as i32 / 2)) as f32;
+                for (pos, mesh) in &self.chunk_meshes {
+                    let chunk_center_x = (pos.x * CHUNK_WIDTH as i32 + (CHUNK_WIDTH as i32 / 2)) as f32;
+                    let chunk_center_z = (pos.z * CHUNK_DEPTH as i32 + (CHUNK_DEPTH as i32 / 2)) as f32;
 
-                let to_chunk_xz = glam::Vec2::new(chunk_center_x - cam_pos.x, chunk_center_z - cam_pos.z);
-                let dist = to_chunk_xz.length();
-                if dist > 32.0 {
-                    let cam_front_xz = glam::Vec2::new(cam_front.x, cam_front.z);
-                    let front_len = cam_front_xz.length();
-                    if front_len > 0.001 {
-                        let dot = (cam_front_xz / front_len).dot(to_chunk_xz / dist);
-                        if dot < -0.35 {
-                            continue; // Culled strictly behind camera
+                    let to_chunk_xz = glam::Vec2::new(chunk_center_x - cam_pos.x, chunk_center_z - cam_pos.z);
+                    let dist = to_chunk_xz.length();
+                    if dist > 32.0 {
+                        let cam_front_xz = glam::Vec2::new(cam_front.x, cam_front.z);
+                        let front_len = cam_front_xz.length();
+                        if front_len > 0.001 {
+                            let dot = (cam_front_xz / front_len).dot(to_chunk_xz / dist);
+                            if dot < -0.35 {
+                                continue;
+                            }
                         }
                     }
-                }
 
-                render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                render_pass.draw_indexed(0..mesh.index_count, 0, 0..1);
-                rendered_chunks += 1;
+                    render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                    rendered_chunks += 1;
+                }
             }
+
+            // 2. Render 2D UI Overlay directly on top!
+            self.ui_pipeline.render(&mut render_pass);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

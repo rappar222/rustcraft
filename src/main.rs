@@ -1,6 +1,8 @@
 mod app;
+mod game;
 mod player;
 mod render;
+mod ui;
 mod voxel;
 
 use app::App;

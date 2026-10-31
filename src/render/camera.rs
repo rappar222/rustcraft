@@ -33,6 +33,10 @@ impl Camera {
         }
     }
 
+    pub fn set_fov_degrees(&mut self, fov_deg: f32) {
+        self.fov_y = fov_deg.to_radians();
+    }
+
     pub fn front(&self) -> Vec3 {
         Vec3::new(
             self.yaw.cos() * self.pitch.cos(),
@@ -77,13 +81,19 @@ impl Camera {
         proj * view
     }
 
-    pub fn to_uniform(&self, view_distance_blocks: f32) -> CameraUniform {
+    pub fn to_uniform(&self, view_distance_blocks: f32, fog_enabled: bool) -> CameraUniform {
         let view_proj = self.build_view_projection_matrix();
+        let (fog_min, fog_max) = if fog_enabled {
+            (view_distance_blocks * 0.60, view_distance_blocks * 0.98)
+        } else {
+            (99999.0, 100000.0)
+        };
+
         CameraUniform {
             view_proj: view_proj.to_cols_array(),
             cam_pos: [self.position.x, self.position.y, self.position.z, 1.0],
             fog_color: [0.65, 0.82, 1.0, 1.0], // Sky blue
-            fog_info: [view_distance_blocks * 0.65, view_distance_blocks * 0.98, 0.0, 0.0],
+            fog_info: [fog_min, fog_max, 0.0, 0.0],
         }
     }
 }

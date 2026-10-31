@@ -1,5 +1,7 @@
 use super::physics::Physics;
 use super::raycast::raycast_voxels;
+use crate::game::state::GameMode;
+use crate::game::survival::SurvivalState;
 use crate::render::camera::Camera;
 use crate::voxel::block::BlockType;
 use crate::voxel::world::World;
@@ -12,7 +14,6 @@ pub struct PlayerController {
     pub velocity: Vec3,
     pub on_ground: bool,
     pub is_flying: bool,
-    pub selected_block: BlockType,
 
     // Input states
     pub forward: bool,
@@ -25,7 +26,7 @@ pub struct PlayerController {
 }
 
 impl PlayerController {
-    pub fn new(spawn_pos: Vec3, aspect: f32) -> Self {
+    pub fn new(spawn_pos: Vec3, aspect: f32, initial_mode: GameMode) -> Self {
         Self {
             camera: Camera::new(
                 Vec3::new(spawn_pos.x, spawn_pos.y + Physics::EYE_HEIGHT, spawn_pos.z),
@@ -33,8 +34,7 @@ impl PlayerController {
             ),
             velocity: Vec3::ZERO,
             on_ground: false,
-            is_flying: true, // Start in fly mode so player doesn't spawn stuck in ground
-            selected_block: BlockType::Stone,
+            is_flying: initial_mode == GameMode::Creative,
 
             forward: false,
             backward: false,
@@ -46,7 +46,14 @@ impl PlayerController {
         }
     }
 
-    pub fn handle_key(&mut self, key: KeyCode, pressed: bool) {
+    pub fn respawn(&mut self, spawn_pos: Vec3) {
+        self.camera.position = Vec3::new(spawn_pos.x, spawn_pos.y + Physics::EYE_HEIGHT, spawn_pos.z);
+        self.velocity = Vec3::ZERO;
+        self.on_ground = false;
+        self.is_flying = false;
+    }
+
+    pub fn handle_key(&mut self, key: KeyCode, pressed: bool, game_mode: GameMode) {
         match key {
             KeyCode::KeyW => self.forward = pressed,
             KeyCode::KeyS => self.backward = pressed,
@@ -55,16 +62,9 @@ impl PlayerController {
             KeyCode::Space => self.jump = pressed,
             KeyCode::ShiftLeft | KeyCode::ShiftRight => self.sneak = pressed,
             KeyCode::ControlLeft => self.sprint = pressed,
-            KeyCode::KeyF if pressed => self.is_flying = !self.is_flying,
-            KeyCode::Digit1 if pressed => self.selected_block = BlockType::Grass,
-            KeyCode::Digit2 if pressed => self.selected_block = BlockType::Dirt,
-            KeyCode::Digit3 if pressed => self.selected_block = BlockType::Stone,
-            KeyCode::Digit4 if pressed => self.selected_block = BlockType::Cobblestone,
-            KeyCode::Digit5 if pressed => self.selected_block = BlockType::Wood,
-            KeyCode::Digit6 if pressed => self.selected_block = BlockType::Leaves,
-            KeyCode::Digit7 if pressed => self.selected_block = BlockType::Sand,
-            KeyCode::Digit8 if pressed => self.selected_block = BlockType::Planks,
-            KeyCode::Digit9 if pressed => self.selected_block = BlockType::Glass,
+            KeyCode::KeyF if pressed && game_mode == GameMode::Creative => {
+                self.is_flying = !self.is_flying;
+            }
             _ => (),
         }
     }
@@ -74,26 +74,22 @@ impl PlayerController {
         self.camera.yaw += (dx as f32) * sensitivity;
         self.camera.pitch -= (dy as f32) * sensitivity;
 
-        // Clamp pitch to avoid gimbal flip
         let limit = 89.0_f32.to_radians();
         self.camera.pitch = self.camera.pitch.clamp(-limit, limit);
     }
 
-    pub fn handle_mouse_click(&mut self, button: MouseButton, world: &mut World) {
+    pub fn handle_mouse_click(&mut self, button: MouseButton, world: &mut World, block_to_place: BlockType) {
         let origin = self.camera.position;
         let direction = self.camera.front();
 
         if let Some(hit) = raycast_voxels(origin, direction, 7.0, world) {
             match button {
                 MouseButton::Left => {
-                    // Break block
                     let (bx, by, bz) = hit.block_pos;
                     world.set_block(bx, by, bz, BlockType::Air);
                 }
                 MouseButton::Right => {
-                    // Place block
                     let (ax, ay, az) = hit.adjacent_pos;
-                    // Don't place inside the player!
                     let p_pos = Vec3::new(
                         self.camera.position.x,
                         self.camera.position.y - Physics::EYE_HEIGHT,
@@ -110,7 +106,7 @@ impl PlayerController {
                     );
 
                     if !p_box.intersects(&b_box) {
-                        world.set_block(ax, ay, az, self.selected_block);
+                        world.set_block(ax, ay, az, block_to_place);
                     }
                 }
                 _ => (),
@@ -118,7 +114,17 @@ impl PlayerController {
         }
     }
 
-    pub fn update(&mut self, world: &World, dt: f32) {
+    pub fn update(
+        &mut self,
+        world: &World,
+        dt: f32,
+        game_mode: GameMode,
+        survival: &mut SurvivalState,
+    ) -> bool {
+        if game_mode == GameMode::Survival {
+            self.is_flying = false;
+        }
+
         let mut move_dir = Vec3::ZERO;
         let front = Vec3::new(self.camera.yaw.cos(), 0.0, self.camera.yaw.sin()).normalize();
         let right = Vec3::new(-self.camera.yaw.sin(), 0.0, self.camera.yaw.cos()).normalize();
@@ -182,5 +188,13 @@ impl PlayerController {
             feet_pos.y + Physics::EYE_HEIGHT,
             feet_pos.z,
         );
+
+        // Survival health & fall damage update
+        let mut is_dead = false;
+        if game_mode == GameMode::Survival {
+            is_dead = survival.update(feet_pos, self.on_ground, dt);
+        }
+
+        is_dead
     }
 }
