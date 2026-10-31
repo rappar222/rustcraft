@@ -1,7 +1,7 @@
 use super::camera::Camera;
 use super::mesher::{ChunkMesh, Mesher};
 use super::pipeline::PipelineState;
-use crate::voxel::chunk::{ChunkPos, CHUNK_DEPTH, CHUNK_HEIGHT, CHUNK_WIDTH};
+use crate::voxel::chunk::{ChunkPos, CHUNK_DEPTH, CHUNK_WIDTH};
 use crate::voxel::world::World;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
@@ -221,23 +221,20 @@ impl Renderer {
             render_pass.set_bind_group(0, &self.pipeline_state.bind_group, &[]);
 
             for (pos, mesh) in &self.chunk_meshes {
-                // Chunk frustum / back-culling check
+                // Horizontal chunk culling check (only cull chunks strictly behind camera)
                 let chunk_center_x = (pos.x * CHUNK_WIDTH as i32 + (CHUNK_WIDTH as i32 / 2)) as f32;
                 let chunk_center_z = (pos.z * CHUNK_DEPTH as i32 + (CHUNK_DEPTH as i32 / 2)) as f32;
-                let chunk_center_y = (CHUNK_HEIGHT as f32) * 0.5;
 
-                let to_chunk = glam::Vec3::new(
-                    chunk_center_x - cam_pos.x,
-                    chunk_center_y - cam_pos.y,
-                    chunk_center_z - cam_pos.z,
-                );
-
-                // If chunk is further than 20 blocks behind the camera view, cull it
-                let dist_sq = to_chunk.x * to_chunk.x + to_chunk.z * to_chunk.z;
-                if dist_sq > 25.0 * 25.0 {
-                    let dot = to_chunk.normalize().dot(cam_front);
-                    if dot < -0.3 {
-                        continue; // Culled!
+                let to_chunk_xz = glam::Vec2::new(chunk_center_x - cam_pos.x, chunk_center_z - cam_pos.z);
+                let dist = to_chunk_xz.length();
+                if dist > 32.0 {
+                    let cam_front_xz = glam::Vec2::new(cam_front.x, cam_front.z);
+                    let front_len = cam_front_xz.length();
+                    if front_len > 0.001 {
+                        let dot = (cam_front_xz / front_len).dot(to_chunk_xz / dist);
+                        if dot < -0.35 {
+                            continue; // Culled strictly behind camera
+                        }
                     }
                 }
 

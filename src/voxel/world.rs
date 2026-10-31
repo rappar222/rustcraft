@@ -108,7 +108,16 @@ impl World {
             .collect();
 
         for chunk in generated {
+            let p = chunk.pos;
             self.chunks.insert(chunk.pos, chunk);
+
+            // Mark adjacent existing chunks dirty so boundary faces update seamlessly
+            for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let neighbor_pos = ChunkPos::new(p.x + dx, p.z + dz);
+                if let Some(neighbor) = self.chunks.get_mut(&neighbor_pos) {
+                    neighbor.is_dirty = true;
+                }
+            }
         }
     }
 

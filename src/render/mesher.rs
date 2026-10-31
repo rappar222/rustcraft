@@ -48,43 +48,43 @@ impl Mesher {
                     let fy = gy as f32;
                     let fz = gz as f32;
 
-                    // Face 0: +X (Right / East)
+                    // Face 0: +X (Right / East, normal = (+1, 0, 0))
                     if Self::is_face_visible(world.get_block(gx + 1, gy, gz), block) {
                         let tex_layer = block.texture_layer(0);
                         let ao = [
-                            Self::vertex_ao(world, gx + 1, gy, gz - 1, gx + 1, gy - 1, gz, gx + 1, gy - 1, gz - 1),
-                            Self::vertex_ao(world, gx + 1, gy, gz + 1, gx + 1, gy - 1, gz, gx + 1, gy - 1, gz + 1),
-                            Self::vertex_ao(world, gx + 1, gy, gz + 1, gx + 1, gy + 1, gz, gx + 1, gy + 1, gz + 1),
-                            Self::vertex_ao(world, gx + 1, gy, gz - 1, gx + 1, gy + 1, gz, gx + 1, gy + 1, gz - 1),
+                            Self::vertex_ao(world, gx + 1, gy - 1, gz, gx + 1, gy, gz + 1, gx + 1, gy - 1, gz + 1),
+                            Self::vertex_ao(world, gx + 1, gy - 1, gz, gx + 1, gy, gz - 1, gx + 1, gy - 1, gz - 1),
+                            Self::vertex_ao(world, gx + 1, gy + 1, gz, gx + 1, gy, gz - 1, gx + 1, gy + 1, gz - 1),
+                            Self::vertex_ao(world, gx + 1, gy + 1, gz, gx + 1, gy, gz + 1, gx + 1, gy + 1, gz + 1),
                         ];
                         let quad = [
-                            BlockVertex { position: [fx + 1.0, fy, fz], normal_idx: 0, uv: [1.0, 1.0], tex_layer, ao: ao[0] },
-                            BlockVertex { position: [fx + 1.0, fy, fz + 1.0], normal_idx: 0, uv: [0.0, 1.0], tex_layer, ao: ao[1] },
-                            BlockVertex { position: [fx + 1.0, fy + 1.0, fz + 1.0], normal_idx: 0, uv: [0.0, 0.0], tex_layer, ao: ao[2] },
-                            BlockVertex { position: [fx + 1.0, fy + 1.0, fz], normal_idx: 0, uv: [1.0, 0.0], tex_layer, ao: ao[3] },
+                            BlockVertex { position: [fx + 1.0, fy, fz + 1.0], normal_idx: 0, uv: [0.0, 1.0], tex_layer, ao: ao[0] },
+                            BlockVertex { position: [fx + 1.0, fy, fz], normal_idx: 0, uv: [1.0, 1.0], tex_layer, ao: ao[1] },
+                            BlockVertex { position: [fx + 1.0, fy + 1.0, fz], normal_idx: 0, uv: [1.0, 0.0], tex_layer, ao: ao[2] },
+                            BlockVertex { position: [fx + 1.0, fy + 1.0, fz + 1.0], normal_idx: 0, uv: [0.0, 0.0], tex_layer, ao: ao[3] },
                         ];
                         Self::push_quad(&mut vertices, &mut indices, quad, ao);
                     }
 
-                    // Face 1: -X (Left / West)
+                    // Face 1: -X (Left / West, normal = (-1, 0, 0))
                     if Self::is_face_visible(world.get_block(gx - 1, gy, gz), block) {
                         let tex_layer = block.texture_layer(1);
                         let ao = [
-                            Self::vertex_ao(world, gx - 1, gy, gz + 1, gx - 1, gy - 1, gz, gx - 1, gy - 1, gz + 1),
-                            Self::vertex_ao(world, gx - 1, gy, gz - 1, gx - 1, gy - 1, gz, gx - 1, gy - 1, gz - 1),
-                            Self::vertex_ao(world, gx - 1, gy, gz - 1, gx - 1, gy + 1, gz, gx - 1, gy + 1, gz - 1),
-                            Self::vertex_ao(world, gx - 1, gy, gz + 1, gx - 1, gy + 1, gz, gx - 1, gy + 1, gz + 1),
+                            Self::vertex_ao(world, gx - 1, gy - 1, gz, gx - 1, gy, gz - 1, gx - 1, gy - 1, gz - 1),
+                            Self::vertex_ao(world, gx - 1, gy - 1, gz, gx - 1, gy, gz + 1, gx - 1, gy - 1, gz + 1),
+                            Self::vertex_ao(world, gx - 1, gy + 1, gz, gx - 1, gy, gz + 1, gx - 1, gy + 1, gz + 1),
+                            Self::vertex_ao(world, gx - 1, gy + 1, gz, gx - 1, gy, gz - 1, gx - 1, gy + 1, gz - 1),
                         ];
                         let quad = [
-                            BlockVertex { position: [fx, fy, fz + 1.0], normal_idx: 1, uv: [1.0, 1.0], tex_layer, ao: ao[0] },
-                            BlockVertex { position: [fx, fy, fz], normal_idx: 1, uv: [0.0, 1.0], tex_layer, ao: ao[1] },
-                            BlockVertex { position: [fx, fy + 1.0, fz], normal_idx: 1, uv: [0.0, 0.0], tex_layer, ao: ao[2] },
-                            BlockVertex { position: [fx, fy + 1.0, fz + 1.0], normal_idx: 1, uv: [1.0, 0.0], tex_layer, ao: ao[3] },
+                            BlockVertex { position: [fx, fy, fz], normal_idx: 1, uv: [0.0, 1.0], tex_layer, ao: ao[0] },
+                            BlockVertex { position: [fx, fy, fz + 1.0], normal_idx: 1, uv: [1.0, 1.0], tex_layer, ao: ao[1] },
+                            BlockVertex { position: [fx, fy + 1.0, fz + 1.0], normal_idx: 1, uv: [1.0, 0.0], tex_layer, ao: ao[2] },
+                            BlockVertex { position: [fx, fy + 1.0, fz], normal_idx: 1, uv: [0.0, 0.0], tex_layer, ao: ao[3] },
                         ];
                         Self::push_quad(&mut vertices, &mut indices, quad, ao);
                     }
 
-                    // Face 2: +Y (Top)
+                    // Face 2: +Y (Top, normal = (0, +1, 0))
                     if Self::is_face_visible(world.get_block(gx, gy + 1, gz), block) {
                         let tex_layer = block.texture_layer(2);
                         let ao = [
@@ -102,7 +102,7 @@ impl Mesher {
                         Self::push_quad(&mut vertices, &mut indices, quad, ao);
                     }
 
-                    // Face 3: -Y (Bottom)
+                    // Face 3: -Y (Bottom, normal = (0, -1, 0))
                     if Self::is_face_visible(world.get_block(gx, gy - 1, gz), block) {
                         let tex_layer = block.texture_layer(3);
                         let ao = [
@@ -120,7 +120,7 @@ impl Mesher {
                         Self::push_quad(&mut vertices, &mut indices, quad, ao);
                     }
 
-                    // Face 4: +Z (South)
+                    // Face 4: +Z (South, normal = (0, 0, +1))
                     if Self::is_face_visible(world.get_block(gx, gy, gz + 1), block) {
                         let tex_layer = block.texture_layer(4);
                         let ao = [
@@ -138,7 +138,7 @@ impl Mesher {
                         Self::push_quad(&mut vertices, &mut indices, quad, ao);
                     }
 
-                    // Face 5: -Z (North)
+                    // Face 5: -Z (North, normal = (0, 0, -1))
                     if Self::is_face_visible(world.get_block(gx, gy, gz - 1), block) {
                         let tex_layer = block.texture_layer(5);
                         let ao = [
