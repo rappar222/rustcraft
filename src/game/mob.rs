@@ -1,6 +1,7 @@
 use crate::game::dropped_item::DroppedItemManager;
 use crate::game::state::GameMode;
 use crate::game::survival::SurvivalState;
+use crate::render::texture::TextureManager;
 use crate::render::vertex::BlockVertex;
 use crate::voxel::block::BlockType;
 use crate::voxel::world::{World, SEA_LEVEL};
@@ -431,75 +432,120 @@ impl MobManager {
 
             match mob.kind {
                 MobKind::Pig => {
-                    let tl_pink = BlockType::RawPorkchop.texture_layer(0);
+                    let tl_skin = TextureManager::LAYER_PIG_SKIN;
+                    let tl_face = TextureManager::LAYER_PIG_FACE;
                     // Body
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.0, 0.45, 0.0], [0.42, 0.25, 0.28], tl_pink, ao);
-                    // Head
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.45, 0.62, 0.0], [0.22, 0.22, 0.22], tl_pink, ao);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.0, 0.46, 0.0], [0.40, 0.22, 0.25], tl_skin, tl_skin, ao);
+                    // Head with Pig Face on front (+X)
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.42, 0.60, 0.0], [0.20, 0.20, 0.20], tl_face, tl_skin, ao);
+                    // 3D Protruding Pig Snout
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.64, 0.54, 0.0], [0.05, 0.07, 0.09], tl_face, tl_skin, ao * 1.04);
                     // 4 Animated Legs
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.25 + leg_swing, 0.15, 0.16], [0.10, 0.15, 0.10], tl_pink, ao * 0.85);
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.25 - leg_swing, 0.15, -0.16], [0.10, 0.15, 0.10], tl_pink, ao * 0.85);
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [-0.25 - leg_swing, 0.15, 0.16], [0.10, 0.15, 0.10], tl_pink, ao * 0.85);
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [-0.25 + leg_swing, 0.15, -0.16], [0.10, 0.15, 0.10], tl_pink, ao * 0.85);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.25 + leg_swing, 0.14, 0.15], [0.09, 0.14, 0.09], tl_skin, tl_skin, ao * 0.88);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.25 - leg_swing, 0.14, -0.15], [0.09, 0.14, 0.09], tl_skin, tl_skin, ao * 0.88);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [-0.25 - leg_swing, 0.14, 0.15], [0.09, 0.14, 0.09], tl_skin, tl_skin, ao * 0.88);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [-0.25 + leg_swing, 0.14, -0.15], [0.09, 0.14, 0.09], tl_skin, tl_skin, ao * 0.88);
                 }
                 MobKind::Zombie => {
-                    let tl_skin = BlockType::Cactus.texture_layer(2);
-                    let tl_shirt = BlockType::Water.texture_layer(0);
-                    let tl_pants = BlockType::Obsidian.texture_layer(0);
+                    let tl_skin = TextureManager::LAYER_ZOMBIE_SKIN;
+                    let tl_face = TextureManager::LAYER_ZOMBIE_FACE;
+                    let tl_shirt = TextureManager::LAYER_ZOMBIE_SHIRT;
+                    let tl_pants = TextureManager::LAYER_ZOMBIE_PANTS;
                     // Legs
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [leg_swing, 0.35, 0.12], [0.11, 0.35, 0.11], tl_pants, ao * 0.85);
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [-leg_swing, 0.35, -0.12], [0.11, 0.35, 0.11], tl_pants, ao * 0.85);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [leg_swing * 0.7, 0.36, 0.11], [0.11, 0.36, 0.11], tl_pants, tl_pants, ao * 0.85);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [-leg_swing * 0.7, 0.36, -0.11], [0.11, 0.36, 0.11], tl_pants, tl_pants, ao * 0.85);
                     // Torso
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.0, 1.02, 0.0], [0.14, 0.34, 0.24], tl_shirt, ao);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.0, 1.06, 0.0], [0.13, 0.36, 0.22], tl_shirt, tl_shirt, ao);
                     // Outstretched Zombie Arms
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.28, 1.18, 0.32], [0.28, 0.10, 0.10], tl_skin, ao);
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.28, 1.18, -0.32], [0.28, 0.10, 0.10], tl_skin, ao);
-                    // Head
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.0, 1.56, 0.0], [0.22, 0.22, 0.22], tl_skin, ao);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.26, 1.28, 0.32], [0.28, 0.10, 0.10], tl_skin, tl_skin, ao);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.26, 1.28, -0.32], [0.28, 0.10, 0.10], tl_skin, tl_skin, ao);
+                    // Head with Zombie Face on front (+X)
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.0, 1.62, 0.0], [0.21, 0.21, 0.21], tl_face, tl_skin, ao);
                 }
                 MobKind::Creeper => {
-                    let tl_green = BlockType::Grass.texture_layer(2);
+                    let tl_skin = TextureManager::LAYER_CREEPER_SKIN;
+                    let tl_face = TextureManager::LAYER_CREEPER_FACE;
                     // 4 Short Creeper Feet
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.18 + leg_swing, 0.18, 0.14], [0.12, 0.18, 0.12], tl_green, ao * 0.85);
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.18 - leg_swing, 0.18, -0.14], [0.12, 0.18, 0.12], tl_green, ao * 0.85);
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [-0.18 - leg_swing, 0.18, 0.14], [0.12, 0.18, 0.12], tl_green, ao * 0.85);
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [-0.18 + leg_swing, 0.18, -0.14], [0.12, 0.18, 0.12], tl_green, ao * 0.85);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.18 + leg_swing, 0.18, 0.14], [0.11, 0.18, 0.11], tl_skin, tl_skin, ao * 0.85);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.18 - leg_swing, 0.18, -0.14], [0.11, 0.18, 0.11], tl_skin, tl_skin, ao * 0.85);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [-0.18 - leg_swing, 0.18, 0.14], [0.11, 0.18, 0.11], tl_skin, tl_skin, ao * 0.85);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [-0.18 + leg_swing, 0.18, -0.14], [0.11, 0.18, 0.11], tl_skin, tl_skin, ao * 0.85);
                     // Tall Torso
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.0, 0.82, 0.0], [0.16, 0.45, 0.20], tl_green, ao);
-                    // Head
-                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.0, 1.46, 0.0], [0.22, 0.22, 0.22], tl_green, ao);
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.0, 0.80, 0.0], [0.15, 0.45, 0.19], tl_skin, tl_skin, ao);
+                    // Head with Iconic Creeper Face on front (+X)
+                    Self::append_oriented_part(vertices, indices, mob.position, mob.yaw, [0.0, 1.45, 0.0], [0.21, 0.21, 0.21], tl_face, tl_skin, ao);
                 }
             }
         }
 
-        // 2. Render 3D First-Person Right Hand / Held Block / Held Tool in bottom-right of view!
-        let bob_x = (walk_bob * 0.5).cos() * 0.018;
-        let bob_y = (walk_bob).sin().abs() * 0.022;
+        // 2. Render 3D First-Person Right Hand / Held Block / Held Tool in camera view space!
+        let bob_x = (walk_bob * 0.5).cos() * 0.016;
+        let bob_y = (walk_bob).sin().abs() * 0.020;
         let swing_angle = (swing_timer * std::f32::consts::PI).sin();
-        let hand_pos = cam_pos
-            + cam_front * (0.48 - swing_angle * 0.10)
-            + cam_right * (0.32 + bob_x - swing_angle * 0.08)
-            - cam_up * (0.26 - bob_y + swing_angle * 0.12);
 
-        let yaw = cam_front.z.atan2(cam_front.x) + 0.4 + swing_angle * 0.6;
+        let hand_pos = cam_pos
+            + cam_front * (0.50 - swing_angle * 0.10)
+            + cam_right * (0.33 + bob_x - swing_angle * 0.08)
+            - cam_up * (0.24 - bob_y + swing_angle * 0.12);
+
         if held_item == BlockType::Air {
-            // Empty skin hand
-            let tl_hand = BlockType::Sand.texture_layer(0);
-            Self::append_oriented_part(vertices, indices, hand_pos, yaw, [0.0, 0.0, 0.0], [0.14, 0.07, 0.07], tl_hand, 1.0);
+            // 3D First-person right forearm angled forward into view (right-handed basis: ax x ay = az)
+            let arm_forward = (cam_front * 0.82 - cam_right * 0.35 + cam_up * (0.42 - swing_angle * 0.65)).normalize_or_zero();
+            let arm_right = arm_forward.cross(cam_up).normalize_or_zero();
+            let arm_up = arm_forward.cross(arm_right).normalize_or_zero();
+            Self::append_basis_box(
+                vertices,
+                indices,
+                hand_pos - arm_forward * 0.06,
+                arm_right * 0.055,
+                arm_up * 0.055,
+                arm_forward * 0.16,
+                TextureManager::LAYER_PLAYER_SKIN,
+                1.0,
+            );
         } else if held_item.is_placeable() && held_item != BlockType::Torch {
-            // Held 3D mini-block
-            let s = 0.11;
-            for face in 0..6 {
-                let tl = held_item.texture_layer(face);
-                Self::append_oriented_face(vertices, indices, hand_pos, yaw, s, face, tl, 1.05);
-            }
+            // Held 3D mini-block rotated 45 deg in camera space so it follows pitch & yaw
+            let s = 0.105;
+            let c45 = 0.70710677;
+            let raw_x = (cam_right * c45 + cam_front * c45).normalize_or_zero();
+            let raw_y = (cam_up * (1.0 - swing_angle * 0.25) - cam_front * (swing_angle * 0.25)).normalize_or_zero();
+            let dir_z = raw_x.cross(raw_y).normalize_or_zero();
+            let ortho_y = dir_z.cross(raw_x).normalize_or_zero();
+            Self::append_basis_block(
+                vertices,
+                indices,
+                hand_pos,
+                raw_x * s,
+                ortho_y * s,
+                dir_z * s,
+                held_item,
+                1.05,
+            );
         } else {
-            // Held Tool / Sword / Torch / Food rod
-            let tl = held_item.texture_layer(0);
-            Self::append_oriented_part(vertices, indices, hand_pos, yaw, [0.0, 0.04, 0.0], [0.16, 0.16, 0.03], tl, 1.15);
+            // Held 3D pixel-extruded Tool / Weapon / Torch / Food in right hand!
+            // Sprite +X/+Y diagonal points forward and up; sprite plane faces inward-left
+            let pitch_swing = swing_angle * 0.75;
+            let dir_x = (cam_front * (0.78 + pitch_swing * 0.35) - cam_right * 0.32 - cam_up * (0.20 + pitch_swing * 0.55)).normalize_or_zero();
+            let dir_y = (cam_up * (0.85 - pitch_swing * 0.45) + cam_front * (0.38 - pitch_swing * 0.45) - cam_right * 0.15).normalize_or_zero();
+            let dir_z = dir_x.cross(dir_y).normalize_or_zero();
+            let ortho_y = dir_z.cross(dir_x).normalize_or_zero();
+
+            let scale = 0.165;
+            let half_thick = 0.016;
+            DroppedItemManager::append_extruded_sprite(
+                vertices,
+                indices,
+                hand_pos + cam_up * 0.03,
+                dir_x * scale,
+                ortho_y * scale,
+                dir_z * half_thick,
+                held_item.texture_layer(0),
+                1.12,
+            );
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn append_oriented_part(
         vertices: &mut Vec<BlockVertex>,
         indices: &mut Vec<u32>,
@@ -507,7 +553,8 @@ impl MobManager {
         yaw: f32,
         local_offset: [f32; 3],
         half_extents: [f32; 3],
-        tl: u32,
+        front_tl: u32,
+        side_tl: u32,
         ao: f32,
     ) {
         let cos_y = yaw.cos();
@@ -526,13 +573,48 @@ impl MobManager {
             ]
         };
 
+        let faces: [([f32; 3], [f32; 3], [f32; 3], [f32; 3], u32, u32); 6] = [
+            (xform(hx, -hy, hz), xform(hx, -hy, -hz), xform(hx, hy, -hz), xform(hx, hy, hz), 0, front_tl),
+            (xform(-hx, -hy, -hz), xform(-hx, -hy, hz), xform(-hx, hy, hz), xform(-hx, hy, -hz), 1, side_tl),
+            (xform(-hx, hy, hz), xform(hx, hy, hz), xform(hx, hy, -hz), xform(-hx, hy, -hz), 2, side_tl),
+            (xform(-hx, -hy, -hz), xform(hx, -hy, -hz), xform(hx, -hy, hz), xform(-hx, -hy, hz), 3, side_tl),
+            (xform(-hx, -hy, hz), xform(hx, -hy, hz), xform(hx, hy, hz), xform(-hx, hy, hz), 4, side_tl),
+            (xform(hx, -hy, -hz), xform(-hx, -hy, -hz), xform(-hx, hy, -hz), xform(hx, hy, -hz), 5, side_tl),
+        ];
+
+        for (p0, p1, p2, p3, n_idx, tl) in faces {
+            let base = vertices.len() as u32;
+            vertices.extend_from_slice(&[
+                BlockVertex { position: p0, normal_idx: n_idx, uv: [0.0, 1.0], tex_layer: tl, ao },
+                BlockVertex { position: p1, normal_idx: n_idx, uv: [1.0, 1.0], tex_layer: tl, ao },
+                BlockVertex { position: p2, normal_idx: n_idx, uv: [1.0, 0.0], tex_layer: tl, ao },
+                BlockVertex { position: p3, normal_idx: n_idx, uv: [0.0, 0.0], tex_layer: tl, ao },
+            ]);
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
+
+    fn append_basis_box(
+        vertices: &mut Vec<BlockVertex>,
+        indices: &mut Vec<u32>,
+        origin: Vec3,
+        ax: Vec3,
+        ay: Vec3,
+        az: Vec3,
+        tl: u32,
+        ao: f32,
+    ) {
+        let pt = |x: f32, y: f32, z: f32| -> [f32; 3] {
+            (origin + ax * x + ay * y + az * z).to_array()
+        };
+
         let faces: [([f32; 3], [f32; 3], [f32; 3], [f32; 3], u32); 6] = [
-            (xform(hx, -hy, hz), xform(hx, -hy, -hz), xform(hx, hy, -hz), xform(hx, hy, hz), 0),
-            (xform(-hx, -hy, -hz), xform(-hx, -hy, hz), xform(-hx, hy, hz), xform(-hx, hy, -hz), 1),
-            (xform(-hx, hy, hz), xform(hx, hy, hz), xform(hx, hy, -hz), xform(-hx, hy, -hz), 2),
-            (xform(-hx, -hy, -hz), xform(hx, -hy, -hz), xform(hx, -hy, hz), xform(-hx, -hy, hz), 3),
-            (xform(-hx, -hy, hz), xform(hx, -hy, hz), xform(hx, hy, hz), xform(-hx, hy, hz), 4),
-            (xform(hx, -hy, -hz), xform(-hx, -hy, -hz), xform(-hx, hy, -hz), xform(hx, hy, -hz), 5),
+            (pt(1.0, -1.0, 1.0), pt(1.0, -1.0, -1.0), pt(1.0, 1.0, -1.0), pt(1.0, 1.0, 1.0), 0),
+            (pt(-1.0, -1.0, -1.0), pt(-1.0, -1.0, 1.0), pt(-1.0, 1.0, 1.0), pt(-1.0, 1.0, -1.0), 1),
+            (pt(-1.0, 1.0, 1.0), pt(1.0, 1.0, 1.0), pt(1.0, 1.0, -1.0), pt(-1.0, 1.0, -1.0), 2),
+            (pt(-1.0, -1.0, -1.0), pt(1.0, -1.0, -1.0), pt(1.0, -1.0, 1.0), pt(-1.0, -1.0, 1.0), 3),
+            (pt(-1.0, -1.0, 1.0), pt(1.0, -1.0, 1.0), pt(1.0, 1.0, 1.0), pt(-1.0, 1.0, 1.0), 4),
+            (pt(1.0, -1.0, -1.0), pt(-1.0, -1.0, -1.0), pt(-1.0, 1.0, -1.0), pt(1.0, 1.0, -1.0), 5),
         ];
 
         for (p0, p1, p2, p3, n_idx) in faces {
@@ -547,43 +629,41 @@ impl MobManager {
         }
     }
 
-    fn append_oriented_face(
+    #[allow(clippy::too_many_arguments)]
+    fn append_basis_block(
         vertices: &mut Vec<BlockVertex>,
         indices: &mut Vec<u32>,
         origin: Vec3,
-        yaw: f32,
-        s: f32,
-        face: usize,
-        tl: u32,
+        ax: Vec3,
+        ay: Vec3,
+        az: Vec3,
+        block: BlockType,
         ao: f32,
     ) {
-        let cos_y = yaw.cos();
-        let sin_y = yaw.sin();
-        let xform = |lx: f32, ly: f32, lz: f32| -> [f32; 3] {
-            [
-                origin.x + lx * cos_y - lz * sin_y,
-                origin.y + ly,
-                origin.z + lx * sin_y + lz * cos_y,
-            ]
+        let pt = |x: f32, y: f32, z: f32| -> [f32; 3] {
+            (origin + ax * x + ay * y + az * z).to_array()
         };
 
-        let (p0, p1, p2, p3, n_idx) = match face {
-            0 => (xform(s, -s, s), xform(s, -s, -s), xform(s, s, -s), xform(s, s, s), 0),
-            1 => (xform(-s, -s, -s), xform(-s, -s, s), xform(-s, s, s), xform(-s, s, -s), 1),
-            2 => (xform(-s, s, s), xform(s, s, s), xform(s, s, -s), xform(-s, s, -s), 2),
-            3 => (xform(-s, -s, -s), xform(s, -s, -s), xform(s, -s, s), xform(-s, -s, s), 3),
-            4 => (xform(-s, -s, s), xform(s, -s, s), xform(s, s, s), xform(-s, s, s), 4),
-            _ => (xform(s, -s, -s), xform(-s, -s, -s), xform(-s, s, -s), xform(s, s, -s), 5),
-        };
+        let faces: [([f32; 3], [f32; 3], [f32; 3], [f32; 3], usize, u32); 6] = [
+            (pt(1.0, -1.0, 1.0), pt(1.0, -1.0, -1.0), pt(1.0, 1.0, -1.0), pt(1.0, 1.0, 1.0), 0, 0),
+            (pt(-1.0, -1.0, -1.0), pt(-1.0, -1.0, 1.0), pt(-1.0, 1.0, 1.0), pt(-1.0, 1.0, -1.0), 1, 1),
+            (pt(-1.0, 1.0, 1.0), pt(1.0, 1.0, 1.0), pt(1.0, 1.0, -1.0), pt(-1.0, 1.0, -1.0), 2, 2),
+            (pt(-1.0, -1.0, -1.0), pt(1.0, -1.0, -1.0), pt(1.0, -1.0, 1.0), pt(-1.0, -1.0, 1.0), 3, 3),
+            (pt(-1.0, -1.0, 1.0), pt(1.0, -1.0, 1.0), pt(1.0, 1.0, 1.0), pt(-1.0, 1.0, 1.0), 4, 4),
+            (pt(1.0, -1.0, -1.0), pt(-1.0, -1.0, -1.0), pt(-1.0, 1.0, -1.0), pt(1.0, 1.0, -1.0), 5, 5),
+        ];
 
-        let base = vertices.len() as u32;
-        vertices.extend_from_slice(&[
-            BlockVertex { position: p0, normal_idx: n_idx, uv: [0.0, 1.0], tex_layer: tl, ao },
-            BlockVertex { position: p1, normal_idx: n_idx, uv: [1.0, 1.0], tex_layer: tl, ao },
-            BlockVertex { position: p2, normal_idx: n_idx, uv: [1.0, 0.0], tex_layer: tl, ao },
-            BlockVertex { position: p3, normal_idx: n_idx, uv: [0.0, 0.0], tex_layer: tl, ao },
-        ]);
-        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        for (p0, p1, p2, p3, face_idx, n_idx) in faces {
+            let tl = block.texture_layer(face_idx);
+            let base = vertices.len() as u32;
+            vertices.extend_from_slice(&[
+                BlockVertex { position: p0, normal_idx: n_idx, uv: [0.0, 1.0], tex_layer: tl, ao },
+                BlockVertex { position: p1, normal_idx: n_idx, uv: [1.0, 1.0], tex_layer: tl, ao },
+                BlockVertex { position: p2, normal_idx: n_idx, uv: [1.0, 0.0], tex_layer: tl, ao },
+                BlockVertex { position: p3, normal_idx: n_idx, uv: [0.0, 0.0], tex_layer: tl, ao },
+            ]);
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
     }
 }
 
@@ -610,5 +690,42 @@ mod tests {
         assert_eq!(mobs.mobs.len(), 0);
         assert!(!drops.items.is_empty());
         assert_eq!(drops.items[0].block, BlockType::RawPorkchop);
+    }
+
+    #[test]
+    fn test_mob_and_extruded_tool_meshes_opaque() {
+        let mut mobs = MobManager::new();
+        mobs.spawn_mob(MobKind::Pig, Vec3::new(2.0, 40.0, 2.0));
+        mobs.spawn_mob(MobKind::Zombie, Vec3::new(5.0, 40.0, 2.0));
+        mobs.spawn_mob(MobKind::Creeper, Vec3::new(8.0, 40.0, 2.0));
+
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        mobs.append_mob_and_hand_meshes(
+            &mut vertices,
+            &mut indices,
+            Vec3::new(0.0, 41.6, 0.0),
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            BlockType::StoneAxe,
+            0.0,
+            0.0,
+        );
+
+        assert!(!vertices.is_empty());
+        assert_eq!(indices.len() % 3, 0);
+
+        // Every vertex of Pig, Zombie, Creeper, and extruded StoneAxe must sample an opaque texel!
+        for v in &vertices {
+            let px = ((v.uv[0] * 16.0).floor() as i32).clamp(0, 15) as u32;
+            let py = ((v.uv[1] * 16.0).floor() as i32).clamp(0, 15) as u32;
+            let rgba = TextureManager::generate_pixel(v.tex_layer, px, py);
+            assert_eq!(
+                rgba[3], 255,
+                "Vertex on layer {} at ({}, {}) had non-opaque alpha {}",
+                v.tex_layer, px, py, rgba[3]
+            );
+        }
     }
 }

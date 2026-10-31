@@ -1,4 +1,5 @@
 use crate::game::inventory::Inventory;
+use crate::render::texture::TextureManager;
 use crate::render::vertex::BlockVertex;
 use crate::voxel::block::BlockType;
 use crate::voxel::world::World;
@@ -257,16 +258,24 @@ impl DroppedItemManager {
         for item in &self.items {
             let bobbing_y = (item.age * 3.5).sin() * 0.06;
             let center = item.position + Vec3::new(0.0, bobbing_y, 0.0);
-            Self::append_rotated_cube(&mut vertices, &mut indices, center, half_size, item.rotation, item.block, 1.0);
+            Self::append_dropped_item_model(
+                &mut vertices,
+                &mut indices,
+                center,
+                half_size,
+                item.rotation,
+                item.block,
+                1.0,
+            );
 
-            // If stack has multiple items, render a second slightly offset mini-cube (classic Minecraft style!)
+            // If stack has multiple items, render a second slightly offset mini-model (classic Minecraft style!)
             if item.count > 1 {
                 let offset = Vec3::new(
                     item.rotation.cos() * 0.055,
                     0.035,
                     item.rotation.sin() * 0.055,
                 );
-                Self::append_rotated_cube(
+                Self::append_dropped_item_model(
                     &mut vertices,
                     &mut indices,
                     center + offset,
@@ -289,6 +298,174 @@ impl DroppedItemManager {
     #[allow(dead_code)]
     pub fn generate_mesh(&self) -> (Vec<BlockVertex>, Vec<u32>) {
         self.generate_mesh_with_highlight(None, 0.0)
+    }
+
+    fn append_dropped_item_model(
+        vertices: &mut Vec<BlockVertex>,
+        indices: &mut Vec<u32>,
+        center: Vec3,
+        s: f32,
+        rot: f32,
+        block: BlockType,
+        ao: f32,
+    ) {
+        if block.is_placeable() && block != BlockType::Torch {
+            Self::append_rotated_cube(vertices, indices, center, s, rot, block, ao);
+        } else {
+            // Render tools, weapons, food, ingots, sticks, and torches as 3D pixel-extruded sprites!
+            let cos_r = rot.cos();
+            let sin_r = rot.sin();
+            let axis_x = Vec3::new(cos_r, 0.0, sin_r) * (s * 1.35);
+            let axis_y = Vec3::new(0.0, 1.0, 0.0) * (s * 1.35);
+            let axis_z = Vec3::new(-sin_r, 0.0, cos_r) * 0.022;
+            Self::append_extruded_sprite(
+                vertices,
+                indices,
+                center + Vec3::new(0.0, 0.04, 0.0),
+                axis_x,
+                axis_y,
+                axis_z,
+                block.texture_layer(0),
+                ao,
+            );
+        }
+    }
+
+    /// Extrudes a 16x16 pixel-art sprite into a watertight 3D voxel model (Minecraft held/dropped item style)
+    pub fn append_extruded_sprite(
+        vertices: &mut Vec<BlockVertex>,
+        indices: &mut Vec<u32>,
+        origin: Vec3,
+        axis_x: Vec3,
+        axis_y: Vec3,
+        axis_z: Vec3,
+        tl: u32,
+        ao: f32,
+    ) {
+        let is_opaque = |px: i32, py: i32| -> bool {
+            if !(0..16).contains(&px) || !(0..16).contains(&py) {
+                false
+            } else {
+                TextureManager::generate_pixel(tl, px as u32, py as u32)[3] > 128
+            }
+        };
+
+        let pt = |x: f32, y: f32, z: f32| -> [f32; 3] {
+            (origin + axis_x * x + axis_y * y + axis_z * z).to_array()
+        };
+
+        let push_quad = |vertices: &mut Vec<BlockVertex>,
+                         indices: &mut Vec<u32>,
+                         p0: [f32; 3],
+                         p1: [f32; 3],
+                         p2: [f32; 3],
+                         p3: [f32; 3],
+                         uv: [f32; 2],
+                         normal_idx: u32,
+                         face_ao: f32| {
+            let base = vertices.len() as u32;
+            vertices.extend_from_slice(&[
+                BlockVertex { position: p0, normal_idx, uv, tex_layer: tl, ao: face_ao },
+                BlockVertex { position: p1, normal_idx, uv, tex_layer: tl, ao: face_ao },
+                BlockVertex { position: p2, normal_idx, uv, tex_layer: tl, ao: face_ao },
+                BlockVertex { position: p3, normal_idx, uv, tex_layer: tl, ao: face_ao },
+            ]);
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        };
+
+        for py in 0..16 {
+            for px in 0..16 {
+                if !is_opaque(px, py) {
+                    continue;
+                }
+
+                let x0 = (px as f32 / 8.0) - 1.0;
+                let x1 = ((px + 1) as f32 / 8.0) - 1.0;
+                let y1 = 1.0 - (py as f32 / 8.0);
+                let y0 = 1.0 - ((py + 1) as f32 / 8.0);
+
+                // Exact pixel center UV prevents any transparent border bleeding
+                let uv = [(px as f32 + 0.5) / 16.0, (py as f32 + 0.5) / 16.0];
+
+                // Front (+Z) & Back (-Z) faces of pixel
+                push_quad(
+                    vertices,
+                    indices,
+                    pt(x0, y0, 1.0),
+                    pt(x1, y0, 1.0),
+                    pt(x1, y1, 1.0),
+                    pt(x0, y1, 1.0),
+                    uv,
+                    2,
+                    ao,
+                );
+                push_quad(
+                    vertices,
+                    indices,
+                    pt(x1, y0, -1.0),
+                    pt(x0, y0, -1.0),
+                    pt(x0, y1, -1.0),
+                    pt(x1, y1, -1.0),
+                    uv,
+                    2,
+                    ao * 0.92,
+                );
+
+                // Exposed 3D perimeter edges
+                if !is_opaque(px + 1, py) {
+                    push_quad(
+                        vertices,
+                        indices,
+                        pt(x1, y0, 1.0),
+                        pt(x1, y0, -1.0),
+                        pt(x1, y1, -1.0),
+                        pt(x1, y1, 1.0),
+                        uv,
+                        0,
+                        ao * 0.82,
+                    );
+                }
+                if !is_opaque(px - 1, py) {
+                    push_quad(
+                        vertices,
+                        indices,
+                        pt(x0, y0, -1.0),
+                        pt(x0, y0, 1.0),
+                        pt(x0, y1, 1.0),
+                        pt(x0, y1, -1.0),
+                        uv,
+                        1,
+                        ao * 0.82,
+                    );
+                }
+                if !is_opaque(px, py - 1) {
+                    push_quad(
+                        vertices,
+                        indices,
+                        pt(x0, y1, 1.0),
+                        pt(x1, y1, 1.0),
+                        pt(x1, y1, -1.0),
+                        pt(x0, y1, -1.0),
+                        uv,
+                        2,
+                        ao * 0.95,
+                    );
+                }
+                if !is_opaque(px, py + 1) {
+                    push_quad(
+                        vertices,
+                        indices,
+                        pt(x0, y0, -1.0),
+                        pt(x1, y0, -1.0),
+                        pt(x1, y0, 1.0),
+                        pt(x0, y0, 1.0),
+                        uv,
+                        3,
+                        ao * 0.72,
+                    );
+                }
+            }
+        }
     }
 
     fn append_rotated_cube(

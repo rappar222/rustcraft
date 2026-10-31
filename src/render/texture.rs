@@ -5,7 +5,17 @@ pub struct TextureManager {
 
 impl TextureManager {
     pub const TEX_SIZE: u32 = 16;
-    pub const LAYER_COUNT: u32 = 64;
+    pub const LAYER_COUNT: u32 = 72;
+
+    pub const LAYER_PIG_SKIN: u32 = 63;
+    pub const LAYER_PIG_FACE: u32 = 64;
+    pub const LAYER_ZOMBIE_SKIN: u32 = 65;
+    pub const LAYER_ZOMBIE_FACE: u32 = 66;
+    pub const LAYER_ZOMBIE_SHIRT: u32 = 67;
+    pub const LAYER_ZOMBIE_PANTS: u32 = 68;
+    pub const LAYER_CREEPER_SKIN: u32 = 69;
+    pub const LAYER_CREEPER_FACE: u32 = 70;
+    pub const LAYER_PLAYER_SKIN: u32 = 71;
 
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let size = Self::TEX_SIZE;
@@ -117,7 +127,7 @@ impl TextureManager {
         }
     }
 
-    fn generate_pixel(layer: u32, x: u32, y: u32) -> [u8; 4] {
+    pub fn generate_pixel(layer: u32, x: u32, y: u32) -> [u8; 4] {
         let noise = ((x.wrapping_mul(31) ^ y.wrapping_mul(97)) % 17) as i32 - 8;
         let noise2 = ((x.wrapping_mul(73) ^ y.wrapping_mul(41)) % 11) as i32 - 5;
 
@@ -679,6 +689,113 @@ impl TextureManager {
                 } else {
                     [0, 0, 0, 0]
                 }
+            }
+            63 => {
+                // Opaque Pig Skin (full 16x16 soft pink voxel texture)
+                [
+                    (242 + noise * 2).clamp(215, 252) as u8,
+                    (172 + noise * 2).clamp(148, 192) as u8,
+                    (170 + noise * 2).clamp(145, 190) as u8,
+                    255,
+                ]
+            }
+            64 => {
+                // Opaque Pig Face (eyes + pink snout with nostrils)
+                if (y == 6 || y == 7) && (x == 2 || x == 13) {
+                    [25, 20, 20, 255] // Black pupils
+                } else if (y == 6 || y == 7) && (x == 3 || x == 12) {
+                    [250, 250, 250, 255] // Eye whites
+                } else if x >= 5 && x <= 10 && y >= 8 && y <= 12 {
+                    // Snout
+                    if (x == 6 || x == 9) && (y == 10 || y == 11) {
+                        [135, 65, 65, 255] // Dark nostrils
+                    } else {
+                        [250, 188, 188, 255]
+                    }
+                } else {
+                    [
+                        (242 + noise * 2).clamp(215, 252) as u8,
+                        (172 + noise * 2).clamp(148, 192) as u8,
+                        (170 + noise * 2).clamp(145, 190) as u8,
+                        255,
+                    ]
+                }
+            }
+            65 => {
+                // Opaque Zombie Skin (moss green)
+                [
+                    (92 + noise * 3).clamp(65, 120) as u8,
+                    (148 + noise * 3).clamp(115, 175) as u8,
+                    (78 + noise * 2).clamp(55, 105) as u8,
+                    255,
+                ]
+            }
+            66 => {
+                // Opaque Zombie Face
+                if (y == 6 || y == 7) && ((x >= 3 && x <= 5) || (x >= 10 && x <= 12)) {
+                    [20, 32, 18, 255] // Hollow dark eyes
+                } else if y == 10 && x >= 6 && x <= 9 {
+                    [45, 72, 38, 255] // Mouth
+                } else {
+                    [
+                        (92 + noise * 3).clamp(65, 120) as u8,
+                        (148 + noise * 3).clamp(115, 175) as u8,
+                        (78 + noise * 2).clamp(55, 105) as u8,
+                        255,
+                    ]
+                }
+            }
+            67 => {
+                // Opaque Zombie/Steve Cyan Shirt
+                [
+                    (42 + noise * 2).clamp(25, 70) as u8,
+                    (158 + noise * 3).clamp(125, 185) as u8,
+                    (168 + noise * 3).clamp(135, 195) as u8,
+                    255,
+                ]
+            }
+            68 => {
+                // Opaque Zombie Indigo Pants
+                [
+                    (55 + noise * 2).clamp(35, 80) as u8,
+                    (52 + noise * 2).clamp(32, 75) as u8,
+                    (132 + noise * 3).clamp(95, 160) as u8,
+                    255,
+                ]
+            }
+            69 => {
+                // Opaque Creeper Speckled Camo Skin
+                [
+                    (85 + noise * 4 + noise2 * 2).clamp(50, 125) as u8,
+                    (178 + noise * 5 + noise2 * 3).clamp(130, 215) as u8,
+                    (72 + noise * 3).clamp(45, 105) as u8,
+                    255,
+                ]
+            }
+            70 => {
+                // Opaque Creeper Face (iconic black eyes & frowning mouth)
+                let in_eyes = (y >= 4 && y <= 6) && ((x >= 3 && x <= 5) || (x >= 10 && x <= 12));
+                let in_nose = (y >= 7 && y <= 9) && (x >= 6 && x <= 9);
+                let in_mouth = (y >= 9 && y <= 12) && ((x >= 4 && x <= 5) || (x >= 10 && x <= 11));
+                if in_eyes || in_nose || in_mouth {
+                    [18, 22, 18, 255]
+                } else {
+                    [
+                        (85 + noise * 4 + noise2 * 2).clamp(50, 125) as u8,
+                        (178 + noise * 5 + noise2 * 3).clamp(130, 215) as u8,
+                        (72 + noise * 3).clamp(45, 105) as u8,
+                        255,
+                    ]
+                }
+            }
+            71 => {
+                // Opaque Player Arm Skin (warm tan)
+                [
+                    (218 + noise * 2).clamp(195, 235) as u8,
+                    (168 + noise * 2).clamp(145, 188) as u8,
+                    (132 + noise * 2).clamp(110, 152) as u8,
+                    255,
+                ]
             }
             _ => [255, 255, 255, 255],
         }
