@@ -59,6 +59,23 @@ impl PlayerController {
         self.is_crouching = false;
     }
 
+    pub fn feet_pos(&self) -> Vec3 {
+        Vec3::new(
+            self.camera.position.x,
+            self.camera.position.y - self.eye_height,
+            self.camera.position.z,
+        )
+    }
+
+    #[allow(dead_code)]
+    pub fn center_pos(&self) -> Vec3 {
+        Vec3::new(
+            self.camera.position.x,
+            self.camera.position.y - (self.eye_height * 0.5),
+            self.camera.position.z,
+        )
+    }
+
     pub fn handle_key(&mut self, key: KeyCode, pressed: bool, game_mode: GameMode) {
         match key {
             KeyCode::KeyW => self.forward = pressed,

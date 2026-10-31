@@ -540,7 +540,7 @@ impl ApplicationHandler for App {
                     }
 
                     // Update dropped items
-                    let p_pos = self.player.as_ref().map(|p| p.camera.position).unwrap_or(Vec3::ZERO);
+                    let p_pos = self.player.as_ref().map(|p| p.feet_pos()).unwrap_or(Vec3::ZERO);
                     self.dropped_items.update(&self.world, p_pos, &mut self.inventory, dt);
 
                     // Survival block breaking loop

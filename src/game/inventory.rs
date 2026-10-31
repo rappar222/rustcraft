@@ -152,3 +152,26 @@ impl Inventory {
         amount == 0 // returns true if all items were stored
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add_items() {
+        let mut inv = Inventory::new_survival();
+        for _ in 0..10 {
+            assert!(inv.add_item(BlockType::Dirt, 1));
+        }
+        assert_eq!(inv.hotbar[0].block, BlockType::Dirt);
+        assert_eq!(inv.hotbar[0].count, 10);
+
+        for _ in 0..60 {
+            assert!(inv.add_item(BlockType::Dirt, 1));
+        }
+        // Slot 0 full at 64, slot 1 should have 6
+        assert_eq!(inv.hotbar[0].count, 64);
+        assert_eq!(inv.hotbar[1].block, BlockType::Dirt);
+        assert_eq!(inv.hotbar[1].count, 6);
+    }
+}

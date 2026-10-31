@@ -50,11 +50,13 @@ impl DroppedItemManager {
     pub fn update(
         &mut self,
         world: &World,
-        player_pos: Vec3,
+        player_feet: Vec3,
         inventory: &mut Inventory,
         dt: f32,
     ) {
+        let player_center = player_feet + Vec3::new(0.0, 0.85, 0.0);
         let mut i = 0;
+
         while i < self.items.len() {
             let item = &mut self.items[i];
             item.age += dt;
@@ -64,62 +66,110 @@ impl DroppedItemManager {
                 item.pickup_delay -= dt;
             }
 
-            // Gravity & friction
-            item.velocity.y -= 18.0 * dt;
-            item.velocity.x *= (0.35_f32).powf(dt);
-            item.velocity.z *= (0.35_f32).powf(dt);
-
-            let next_pos = item.position + item.velocity * dt;
-
-            // Simple terrain collision check
-            let block_under = world.get_block(
-                next_pos.x.floor() as i32,
-                (next_pos.y - 0.15).floor() as i32,
-                next_pos.z.floor() as i32,
-            );
-
-            if block_under.is_solid() {
-                item.velocity.y = 0.0;
-                let ground_y = (next_pos.y - 0.15).floor() + 1.15;
-                if item.position.y < ground_y {
-                    item.position.y = ground_y;
-                }
-            } else {
-                item.position.y = next_pos.y;
-            }
-
-            // Horizontal movement if not blocked by wall
-            let wall_block = world.get_block(
-                next_pos.x.floor() as i32,
-                item.position.y.floor() as i32,
-                next_pos.z.floor() as i32,
-            );
-            if !wall_block.is_solid() {
-                item.position.x = next_pos.x;
-                item.position.z = next_pos.z;
-            }
-
-            // Player magnet / pickup
-            let to_player = player_pos - item.position;
-            let dist = to_player.length();
-
-            if item.pickup_delay <= 0.0 && dist < 2.2 {
-                // Attract to player
-                item.velocity += to_player.normalize() * 12.0 * dt;
-
-                if dist < 0.85 {
-                    // Collect item!
-                    if inventory.add_item(item.block, 1) {
-                        self.items.swap_remove(i);
-                        continue;
-                    }
-                }
-            }
-
             // Despawn if older than 5 minutes
             if item.age > 300.0 {
                 self.items.swap_remove(i);
                 continue;
+            }
+
+            // Check if player is already within pickup range
+            let dx = item.position.x - player_feet.x;
+            let dz = item.position.z - player_feet.z;
+            let horiz_dist = (dx * dx + dz * dz).sqrt();
+            let dy = item.position.y - player_feet.y;
+
+            if item.pickup_delay <= 0.0 && horiz_dist < 1.75 && dy >= -0.8 && dy <= 2.2 {
+                if inventory.add_item(item.block, 1) {
+                    self.items.swap_remove(i);
+                    continue;
+                }
+            }
+
+            // Magnet attraction towards player center when nearby
+            let to_center = player_center - item.position;
+            let dist_to_center = to_center.length();
+
+            if item.pickup_delay <= 0.0 && dist_to_center < 3.5 {
+                let pull_dir = to_center.normalize();
+                item.velocity += pull_dir * 32.0 * dt;
+                let cur_spd = item.velocity.length();
+                if cur_spd > 12.0 {
+                    item.velocity = item.velocity * (12.0 / cur_spd);
+                }
+            } else {
+                // Regular physics when not pulled by magnet
+                item.velocity.y -= 22.0 * dt;
+                item.velocity.x *= (0.2_f32).powf(dt);
+                item.velocity.z *= (0.2_f32).powf(dt);
+            }
+
+            // Vertical movement and collision
+            let next_y = item.position.y + item.velocity.y * dt;
+            if item.velocity.y < 0.0 {
+                let test_y = next_y - 0.15;
+                let bx = item.position.x.floor() as i32;
+                let by = test_y.floor() as i32;
+                let bz = item.position.z.floor() as i32;
+                let block = world.get_block(bx, by, bz);
+                if block.is_solid() {
+                    let top_y = by as f32 + 1.0 + 0.15;
+                    item.position.y = top_y;
+                    item.velocity.y = 0.0;
+                } else {
+                    item.position.y = next_y;
+                }
+            } else if item.velocity.y > 0.0 {
+                let test_y = next_y + 0.15;
+                let bx = item.position.x.floor() as i32;
+                let by = test_y.floor() as i32;
+                let bz = item.position.z.floor() as i32;
+                let block = world.get_block(bx, by, bz);
+                if block.is_solid() {
+                    item.velocity.y = 0.0;
+                } else {
+                    item.position.y = next_y;
+                }
+            }
+
+            // Horizontal X movement & collision
+            let next_x = item.position.x + item.velocity.x * dt;
+            let test_x = if item.velocity.x >= 0.0 { next_x + 0.15 } else { next_x - 0.15 };
+            let block_x = world.get_block(
+                test_x.floor() as i32,
+                item.position.y.floor() as i32,
+                item.position.z.floor() as i32,
+            );
+            if block_x.is_solid() {
+                item.velocity.x = 0.0;
+            } else {
+                item.position.x = next_x;
+            }
+
+            // Horizontal Z movement & collision
+            let next_z = item.position.z + item.velocity.z * dt;
+            let test_z = if item.velocity.z >= 0.0 { next_z + 0.15 } else { next_z - 0.15 };
+            let block_z = world.get_block(
+                item.position.x.floor() as i32,
+                item.position.y.floor() as i32,
+                test_z.floor() as i32,
+            );
+            if block_z.is_solid() {
+                item.velocity.z = 0.0;
+            } else {
+                item.position.z = next_z;
+            }
+
+            // Check pickup again after movement
+            let dx_post = item.position.x - player_feet.x;
+            let dz_post = item.position.z - player_feet.z;
+            let horiz_dist_post = (dx_post * dx_post + dz_post * dz_post).sqrt();
+            let dy_post = item.position.y - player_feet.y;
+
+            if item.pickup_delay <= 0.0 && horiz_dist_post < 1.75 && dy_post >= -0.8 && dy_post <= 2.2 {
+                if inventory.add_item(item.block, 1) {
+                    self.items.swap_remove(i);
+                    continue;
+                }
             }
 
             i += 1;
@@ -224,5 +274,37 @@ impl DroppedItemManager {
         }
 
         (vertices, indices)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dropped_item_pickup_on_ground() {
+        let mut manager = DroppedItemManager::new();
+        let mut inv = Inventory::new_survival();
+        let world = World::new(1234);
+
+        // Spawn 10 dropped items near player
+        for i in 0..10 {
+            manager.spawn(BlockType::Dirt, Vec3::new(1.0 + (i as f32) * 0.1, 40.15, 1.0));
+        }
+        assert_eq!(manager.items.len(), 10);
+
+        // Set pickup delay to 0 to simulate time passed
+        for item in &mut manager.items {
+            item.pickup_delay = 0.0;
+        }
+
+        // Player standing at (1.0, 41.0, 1.0) on top of ground block 40
+        let player_feet = Vec3::new(1.0, 41.0, 1.0);
+        manager.update(&world, player_feet, &mut inv, 0.05);
+
+        // All 10 items should be picked up into the inventory!
+        assert_eq!(manager.items.len(), 0);
+        assert_eq!(inv.hotbar[0].block, BlockType::Dirt);
+        assert_eq!(inv.hotbar[0].count, 10);
     }
 }
