@@ -13,9 +13,13 @@ pub struct PlayerController {
     pub camera: Camera,
     pub velocity: Vec3,
     pub on_ground: bool,
+    pub in_water: bool,
+    pub head_underwater: bool,
     pub is_flying: bool,
     pub is_crouching: bool,
     pub eye_height: f32,
+    pub swing_timer: f32, // 0.0..1.0 arm/tool swing animation
+    pub walk_bob: f32,    // Continuous phase for view & hand bobbing
 
     // Input states
     pub forward: bool,
@@ -38,9 +42,13 @@ impl PlayerController {
             ),
             velocity: Vec3::ZERO,
             on_ground: true,
+            in_water: false,
+            head_underwater: false,
             is_flying: initial_mode == GameMode::Creative,
             is_crouching: false,
             eye_height: initial_eye,
+            swing_timer: 0.0,
+            walk_bob: 0.0,
 
             forward: false,
             backward: false,
@@ -58,8 +66,11 @@ impl PlayerController {
         self.camera.position = Vec3::new(spawn_pos.x, spawn_pos.y + self.eye_height, spawn_pos.z);
         self.velocity = Vec3::ZERO;
         self.on_ground = true;
+        self.in_water = false;
+        self.head_underwater = false;
         self.is_flying = false;
         self.is_crouching = false;
+        self.swing_timer = 0.0;
         self.reset_inputs();
     }
 
@@ -71,6 +82,12 @@ impl PlayerController {
         self.jump = false;
         self.sneak = false;
         self.sprint = false;
+    }
+
+    pub fn trigger_swing(&mut self) {
+        if self.swing_timer <= 0.15 {
+            self.swing_timer = 1.0;
+        }
     }
 
     pub fn feet_pos(&self) -> Vec3 {
@@ -112,7 +129,7 @@ impl PlayerController {
     }
 
     pub fn try_place_block(&mut self, world: &mut World, block_to_place: BlockType) -> bool {
-        if block_to_place == BlockType::Air {
+        if !block_to_place.is_placeable() {
             return false;
         }
 
@@ -124,6 +141,16 @@ impl PlayerController {
                 return false;
             }
             let (ax, ay, az) = hit.adjacent_pos;
+
+            // Torches and fluids don't collide with player AABB
+            if !block_to_place.is_solid() {
+                if world.set_block(ax, ay, az, block_to_place) {
+                    self.trigger_swing();
+                    return true;
+                }
+                return false;
+            }
+
             let half_w = Physics::PLAYER_WIDTH * 0.5;
             let player_h = if self.is_crouching {
                 Physics::PLAYER_HEIGHT_CROUCH
@@ -137,8 +164,9 @@ impl PlayerController {
                 Vec3::new(ax as f32 + 1.0, ay as f32 + 1.0, az as f32 + 1.0),
             );
 
-            if !p_box.intersects(&b_box) {
-                return world.set_block(ax, ay, az, block_to_place);
+            if !p_box.intersects(&b_box) && world.set_block(ax, ay, az, block_to_place) {
+                self.trigger_swing();
+                return true;
             }
         }
         false
@@ -152,6 +180,7 @@ impl PlayerController {
             let (bx, by, bz) = hit.block_pos;
             let old_block = world.get_block(bx, by, bz);
             if old_block != BlockType::Air {
+                self.trigger_swing();
                 world.set_block(bx, by, bz, BlockType::Air);
                 let drop_pos = Vec3::new(bx as f32 + 0.5, by as f32 + 0.5, bz as f32 + 0.5);
                 return Some((old_block, drop_pos));
@@ -171,8 +200,12 @@ impl PlayerController {
             self.is_flying = false;
         }
 
-        // Crouch when holding Shift (and not flying), OR keep crouched if under a low ceiling!
-        if self.is_flying {
+        if self.swing_timer > 0.0 {
+            self.swing_timer = (self.swing_timer - dt * 3.8).max(0.0);
+        }
+
+        // Crouch when holding Shift (and not flying/swimming), OR keep crouched if under a low ceiling!
+        if self.is_flying || self.in_water {
             self.is_crouching = false;
         } else if self.sneak {
             self.is_crouching = true;
@@ -205,20 +238,27 @@ impl PlayerController {
             move_dir -= right;
         }
 
+        let can_sprint = self.sprint && (game_mode == GameMode::Creative || survival.hunger > 6.0);
         let speed = if self.is_flying {
-            if self.sprint { 36.0 } else { 16.0 }
+            if can_sprint { 36.0 } else { 16.0 }
+        } else if self.in_water {
+            if can_sprint { 4.2 } else { 3.0 }
         } else if self.is_crouching {
             1.95 // Authentic sneak speed
-        } else if self.sprint {
+        } else if can_sprint {
             7.8
         } else {
             4.8
         };
 
-        if move_dir.length_squared() > 0.001 {
+        let is_moving = move_dir.length_squared() > 0.001;
+        if is_moving {
             let n = move_dir.normalize();
             self.velocity.x = n.x * speed;
             self.velocity.z = n.z * speed;
+            if self.on_ground && !self.is_flying {
+                self.walk_bob += dt * speed * 1.4;
+            }
         }
 
         if self.is_flying {
@@ -229,13 +269,22 @@ impl PlayerController {
             } else {
                 self.velocity.y = 0.0;
             }
+        } else if self.in_water {
+            if self.jump {
+                self.velocity.y = 4.2; // Swim upward!
+            } else if self.sneak {
+                self.velocity.y = -3.8; // Dive downward!
+            }
         } else if self.jump && self.on_ground {
             self.velocity.y = 8.6;
             self.on_ground = false;
+            if game_mode == GameMode::Survival {
+                survival.add_exhaustion(0.05);
+            }
         }
 
         let was_on_ground = self.on_ground;
-        self.on_ground = Physics::update_player(
+        let contact = Physics::update_player(
             &mut self.position,
             &mut self.velocity,
             world,
@@ -244,6 +293,8 @@ impl PlayerController {
             self.is_crouching,
             was_on_ground,
         );
+        self.on_ground = contact.on_ground;
+        self.in_water = contact.in_water;
 
         // Keep creative player from falling into extreme void
         if self.is_flying && self.position.y < -30.0 {
@@ -259,10 +310,27 @@ impl PlayerController {
             self.position.z,
         );
 
-        // Survival health & fall damage update
+        let head_block = world.get_block(
+            self.camera.position.x.floor() as i32,
+            self.camera.position.y.floor() as i32,
+            self.camera.position.z.floor() as i32,
+        );
+        self.head_underwater = head_block == BlockType::Water;
+
+        // Survival health, hunger, drowning & fall damage update
         let mut is_dead = false;
         if game_mode == GameMode::Survival {
-            is_dead = survival.update(self.position, self.on_ground, dt);
+            is_dead = survival.update(
+                self.position,
+                self.on_ground,
+                contact.in_water,
+                self.head_underwater,
+                contact.in_lava,
+                contact.touching_cactus,
+                is_moving,
+                can_sprint && is_moving,
+                dt,
+            );
         }
 
         is_dead
@@ -285,7 +353,6 @@ mod tests {
         let mut survival = SurvivalState::new();
         survival.reset(spawn.y);
 
-        // Toggle crouch on and off across 20 frames while standing still
         player.handle_key(KeyCode::ShiftLeft, true, GameMode::Survival);
         for _ in 0..10 {
             player.update(&world, 0.016, GameMode::Survival, &mut survival);
@@ -295,7 +362,6 @@ mod tests {
         }
         assert!(player.eye_height < Physics::EYE_HEIGHT_STAND - 0.15);
 
-        // Release crouch and ensure uncrouching does not push player into floor
         player.handle_key(KeyCode::ShiftLeft, false, GameMode::Survival);
         for _ in 0..10 {
             player.update(&world, 0.016, GameMode::Survival, &mut survival);
@@ -310,7 +376,6 @@ mod tests {
         let mut world = World::new(42);
         world.generate_chunks_around(ChunkPos::new(0, 0), 1);
 
-        // Place a single isolated block high in the air at (5, 100, 5)
         world.set_block(5, 100, 5, BlockType::Stone);
         let spawn = Vec3::new(5.5, 101.0001, 5.5);
 
@@ -318,7 +383,6 @@ mod tests {
         let mut survival = SurvivalState::new();
         survival.reset(spawn.y);
 
-        // Hold crouch and walk forward + right diagonally for 120 frames
         player.handle_key(KeyCode::ShiftLeft, true, GameMode::Survival);
         player.handle_key(KeyCode::KeyW, true, GameMode::Survival);
         player.handle_key(KeyCode::KeyD, true, GameMode::Survival);

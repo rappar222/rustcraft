@@ -1,5 +1,7 @@
 use crate::game::dropped_item::DroppedItemManager;
 use crate::game::inventory::Inventory;
+use crate::game::mob::MobManager;
+use crate::game::save::WorldSaveData;
 use crate::game::settings::GraphicsSettings;
 use crate::game::state::{GameMode, GameState};
 use crate::game::survival::SurvivalState;
@@ -7,6 +9,7 @@ use crate::player::controller::PlayerController;
 use crate::render::renderer::{RenderError, Renderer};
 use crate::ui::draw::UiBatch;
 use crate::ui::menus::{InventoryAction, MenuRenderer};
+use crate::voxel::block::BlockType;
 use crate::voxel::chunk::ChunkPos;
 use crate::voxel::world::World;
 use glam::Vec3;
@@ -28,6 +31,7 @@ pub struct App {
     survival_inventory_backup: Option<Inventory>,
     survival: SurvivalState,
     dropped_items: DroppedItemManager,
+    mob_manager: MobManager,
     targeted_block: Option<(i32, i32, i32)>,
     breaking_block: Option<(i32, i32, i32)>,
     break_progress: f32,
@@ -44,6 +48,8 @@ pub struct App {
     fps: f32,
     last_player_chunk: Option<ChunkPos>,
     world_generated: bool,
+    time_of_day: f32,
+    status_message: Option<(String, f32)>,
 }
 
 impl App {
@@ -57,6 +63,7 @@ impl App {
             survival_inventory_backup: None,
             survival: SurvivalState::new(),
             dropped_items: DroppedItemManager::new(),
+            mob_manager: MobManager::new(),
             targeted_block: None,
             breaking_block: None,
             break_progress: 0.0,
@@ -73,7 +80,13 @@ impl App {
             fps: 0.0,
             last_player_chunk: None,
             world_generated: false,
+            time_of_day: 0.36, // Bright morning
+            status_message: None,
         }
+    }
+
+    fn show_status(&mut self, msg: impl Into<String>) {
+        self.status_message = Some((msg.into(), 2.8));
     }
 
     fn lock_cursor(&mut self, lock: bool) {
@@ -103,10 +116,15 @@ impl App {
     }
 
     fn get_safe_spawn_pos(&self) -> Vec3 {
-        let spawn_x = 0;
-        let spawn_z = 0;
-        let ground_y = self.world.get_surface_height(spawn_x, spawn_z);
-        Vec3::new(spawn_x as f32 + 0.5, ground_y as f32 + 1.001, spawn_z as f32 + 0.5)
+        self.world.find_safe_spawn()
+    }
+
+    fn is_station_nearby(&self, block: BlockType) -> bool {
+        if let Some(player) = &self.player {
+            self.world.is_block_nearby(player.position, 5, block)
+        } else {
+            false
+        }
     }
 
     fn ensure_world_generated(&mut self) {
@@ -124,7 +142,10 @@ impl App {
     }
 
     fn start_game(&mut self, mode: GameMode) {
+        self.world = World::new(42);
+        self.world_generated = false;
         self.game_mode = mode;
+        self.time_of_day = 0.36;
         self.ensure_world_generated();
 
         self.inventory = match mode {
@@ -134,6 +155,7 @@ impl App {
         self.survival_inventory_backup = None;
 
         self.dropped_items.clear();
+        self.mob_manager.clear();
         self.targeted_block = None;
         self.clear_active_gameplay_inputs();
 
@@ -148,6 +170,74 @@ impl App {
         self.survival.reset(spawn_pos.y);
         self.game_state = GameState::Playing;
         self.lock_cursor(true);
+        self.show_status("Welcome to Rustcraft! Press [E] to Craft, [T] for Time, [F5] to Save");
+    }
+
+    fn save_current_world(&mut self) {
+        if let Some(player) = &self.player {
+            let ok = WorldSaveData::save(
+                &self.world,
+                self.game_mode,
+                self.time_of_day,
+                player.position,
+                player.camera.yaw,
+                player.camera.pitch,
+                &self.survival,
+                &self.inventory,
+            )
+            .is_ok();
+            if ok {
+                self.show_status("World Saved to rustcraft_save.dat!");
+            } else {
+                self.show_status("Failed to save world");
+            }
+        }
+    }
+
+    fn load_saved_world(&mut self) {
+        if let Some(save) = WorldSaveData::load() {
+            self.world = World::new(save.seed);
+            self.game_mode = save.game_mode;
+            self.time_of_day = save.time_of_day;
+
+            let center_chunk = ChunkPos::from_block_coords(
+                save.player_pos.x.floor() as i32,
+                save.player_pos.z.floor() as i32,
+            );
+            self.world.generate_chunks_around(center_chunk, self.settings.render_distance);
+            for ((x, y, z), block) in save.modified_blocks {
+                self.world.set_block(x, y, z, block);
+            }
+            self.last_player_chunk = Some(center_chunk);
+            self.world_generated = true;
+
+            if let Some(renderer) = &mut self.renderer {
+                renderer.update_dirty_chunks(&mut self.world);
+            }
+
+            self.inventory = save.inventory;
+            self.survival_inventory_backup = None;
+
+            self.survival.reset(save.player_pos.y);
+            self.survival.health = save.health.clamp(1.0, self.survival.max_health);
+            self.survival.hunger = save.hunger.clamp(0.0, self.survival.max_hunger);
+
+            if let Some(player) = &mut self.player {
+                player.respawn(save.player_pos);
+                player.camera.yaw = save.yaw;
+                player.camera.pitch = save.pitch;
+                player.is_flying = self.game_mode == GameMode::Creative;
+            }
+
+            self.dropped_items.clear();
+            self.mob_manager.clear();
+            self.clear_active_gameplay_inputs();
+            self.game_state = GameState::Playing;
+            self.lock_cursor(true);
+            self.show_status("Loaded Saved World!");
+        } else {
+            self.start_game(GameMode::Survival);
+        }
     }
 }
 
@@ -182,6 +272,9 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
+                if self.world_generated && self.game_state != GameState::MainMenu {
+                    self.save_current_world();
+                }
                 event_loop.exit();
             }
             WindowEvent::Resized(new_size) => {
@@ -235,6 +328,35 @@ impl ApplicationHandler for App {
                                         self.lock_cursor(false);
                                         return;
                                     }
+                                    KeyCode::KeyQ => {
+                                        // Drop 1 item from selected slot
+                                        let is_creative = self.game_mode == GameMode::Creative;
+                                        let dropped = if is_creative {
+                                            Some(self.inventory.selected_block())
+                                                .filter(|&b| b != BlockType::Air)
+                                        } else {
+                                            self.inventory.drop_selected_one()
+                                        };
+                                        if let Some(dropped_block) = dropped {
+                                            if let Some(player) = &mut self.player {
+                                                player.trigger_swing();
+                                                let eye = player.camera.position;
+                                                let dir = player.camera.front();
+                                                self.dropped_items.spawn_thrown(
+                                                    dropped_block,
+                                                    eye + dir * 0.65 - Vec3::new(0.0, 0.2, 0.0),
+                                                    dir,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    KeyCode::KeyT => {
+                                        self.time_of_day = (self.time_of_day + 0.22).rem_euclid(1.0);
+                                        self.show_status("Time of Day Advanced ([T])");
+                                    }
+                                    KeyCode::F5 => {
+                                        self.save_current_world();
+                                    }
                                     KeyCode::Digit1 => self.inventory.select_slot(0),
                                     KeyCode::Digit2 => self.inventory.select_slot(1),
                                     KeyCode::Digit3 => self.inventory.select_slot(2),
@@ -263,6 +385,8 @@ impl ApplicationHandler for App {
                             if pressed && key_code == KeyCode::Escape {
                                 self.game_state = GameState::Playing;
                                 self.lock_cursor(true);
+                            } else if pressed && key_code == KeyCode::F5 {
+                                self.save_current_world();
                             }
                         }
                         GameState::Settings { from_main_menu } => {
@@ -302,6 +426,7 @@ impl ApplicationHandler for App {
                             for (id, bx, by, bw, bh) in buttons {
                                 if mx >= bx && mx <= bx + bw && my >= by && my <= by + bh {
                                     match id.as_str() {
+                                        "load_saved" => self.load_saved_world(),
                                         "play_survival" => self.start_game(GameMode::Survival),
                                         "play_creative" => self.start_game(GameMode::Creative),
                                         "settings" => self.game_state = GameState::Settings { from_main_menu: true },
@@ -318,20 +443,96 @@ impl ApplicationHandler for App {
                             if self.cursor_locked {
                                 match button {
                                     MouseButton::Left => {
-                                        self.is_lmb_down = true;
-                                        if self.game_mode == GameMode::Creative {
-                                            if let Some(player) = &mut self.player {
-                                                player.handle_instant_break(&mut self.world);
+                                        if let Some(player) = &mut self.player {
+                                            player.trigger_swing();
+                                        }
+
+                                        // Check melee attack on nearby Mobs first!
+                                        let mut hit_mob = false;
+                                        if let Some(player) = &self.player {
+                                            let origin = player.camera.position;
+                                            let dir = player.camera.front();
+                                            let dmg = self.inventory.selected_block().attack_damage();
+                                            hit_mob = self.mob_manager.try_attack_mob(
+                                                origin,
+                                                dir,
+                                                4.2,
+                                                dmg,
+                                                &mut self.dropped_items,
+                                            );
+                                        }
+
+                                        if !hit_mob {
+                                            self.is_lmb_down = true;
+                                            if self.game_mode == GameMode::Creative {
+                                                if let Some((bx, by, bz)) = self.targeted_block {
+                                                    if self.world.get_block(bx, by, bz) == BlockType::TNT {
+                                                        let drops = self.world.explode(bx, by, bz, 3.0);
+                                                        for (b, p) in drops {
+                                                            self.dropped_items.spawn(b, p);
+                                                        }
+                                                        self.show_status("BOOM! TNT Detonated!");
+                                                    } else if let Some(player) = &mut self.player {
+                                                        player.handle_instant_break(&mut self.world);
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                     MouseButton::Right => {
                                         let is_creative = self.game_mode == GameMode::Creative;
+                                        let selected_block = self.inventory.selected_block();
+                                        let is_crouching = self.player.as_ref().map(|p| p.is_crouching).unwrap_or(false);
+
+                                        // 1. Check if right-clicking an interactive block (CraftingTable, Furnace, or TNT)
+                                        if !is_crouching {
+                                            if let Some((bx, by, bz)) = self.targeted_block {
+                                                let target = self.world.get_block(bx, by, bz);
+                                                if target == BlockType::CraftingTable || target == BlockType::Furnace {
+                                                    self.clear_active_gameplay_inputs();
+                                                    self.game_state = GameState::Inventory;
+                                                    self.lock_cursor(false);
+                                                    return;
+                                                } else if target == BlockType::TNT {
+                                                    let drops = self.world.explode(bx, by, bz, 3.0);
+                                                    for (b, p) in drops {
+                                                        self.dropped_items.spawn(b, p);
+                                                    }
+                                                    if let Some(player) = &mut self.player {
+                                                        player.trigger_swing();
+                                                    }
+                                                    self.show_status("BOOM! TNT Detonated!");
+                                                    return;
+                                                }
+                                            }
+                                        }
+
+                                        // 2. Check if holding edible food
+                                        if let Some(food_pts) = selected_block.food_restore() {
+                                            if self.game_mode == GameMode::Survival {
+                                                if self.survival.eat_food(food_pts) {
+                                                    self.inventory.consume_selected(false);
+                                                    if let Some(player) = &mut self.player {
+                                                        player.trigger_swing();
+                                                    }
+                                                    self.show_status(format!(
+                                                        "Ate {} (+{:.0} Hunger)",
+                                                        selected_block.name(),
+                                                        food_pts
+                                                    ));
+                                                } else {
+                                                    self.show_status("Hunger & Health are already full!");
+                                                }
+                                            }
+                                            return;
+                                        }
+
+                                        // 3. Otherwise place block if placeable
                                         if self.inventory.can_place_selected(is_creative) {
-                                            let block = self.inventory.selected_block();
                                             if let Some(player) = &mut self.player {
-                                                if player.try_place_block(&mut self.world, block) {
+                                                if player.try_place_block(&mut self.world, selected_block) {
                                                     self.inventory.consume_selected(is_creative);
+                                                    player.trigger_swing();
                                                 }
                                             }
                                         }
@@ -350,6 +551,8 @@ impl ApplicationHandler for App {
                     GameState::Inventory => {
                         if is_pressed && button == MouseButton::Left {
                             let size = self.window.as_ref().map(|w| w.inner_size()).unwrap_or(PhysicalSize::new(1280, 720));
+                            let near_table = self.is_station_nearby(BlockType::CraftingTable);
+                            let near_furnace = self.is_station_nearby(BlockType::Furnace);
                             let mut dummy = UiBatch::new();
                             let action = MenuRenderer::render_inventory(
                                 &mut dummy,
@@ -357,6 +560,8 @@ impl ApplicationHandler for App {
                                 size.height as f32,
                                 &self.inventory,
                                 self.game_mode,
+                                near_table,
+                                near_furnace,
                                 (mx, my),
                             );
 
@@ -364,12 +569,19 @@ impl ApplicationHandler for App {
                                 Some(InventoryAction::SelectPalette(pal_idx)) => {
                                     let block = Inventory::PALETTE[pal_idx];
                                     if self.game_mode == GameMode::Creative {
-                                        self.inventory.set_slot(self.inventory.selected_slot, block, 64);
+                                        self.inventory.set_slot(
+                                            self.inventory.selected_slot,
+                                            block,
+                                            block.max_stack_size(),
+                                        );
                                     }
                                 }
                                 Some(InventoryAction::CraftRecipe(recipe_idx)) => {
                                     if self.game_mode == GameMode::Survival {
-                                        self.inventory.craft(recipe_idx);
+                                        if self.inventory.craft(recipe_idx, near_table, near_furnace) {
+                                            let out_name = Inventory::RECIPES[recipe_idx].output.name();
+                                            self.show_status(format!("Crafted {}!", out_name));
+                                        }
                                     }
                                 }
                                 Some(InventoryAction::ClickCombinedSlot(slot_idx)) => {
@@ -377,22 +589,20 @@ impl ApplicationHandler for App {
                                         if slot_idx < 9 {
                                             self.inventory.select_slot(slot_idx);
                                         }
+                                    } else if let Some(prev_slot) = self.inventory.held_slot {
+                                        if prev_slot != slot_idx {
+                                            self.inventory.interact_combined_slots(prev_slot, slot_idx);
+                                        }
+                                        self.inventory.held_slot = None;
+                                        if slot_idx < 9 {
+                                            self.inventory.select_slot(slot_idx);
+                                        }
                                     } else {
-                                        if let Some(prev_slot) = self.inventory.held_slot {
-                                            if prev_slot != slot_idx {
-                                                self.inventory.interact_combined_slots(prev_slot, slot_idx);
-                                            }
-                                            self.inventory.held_slot = None;
-                                            if slot_idx < 9 {
-                                                self.inventory.select_slot(slot_idx);
-                                            }
-                                        } else {
-                                            if !self.inventory.get_combined_slot(slot_idx).is_empty() {
-                                                self.inventory.held_slot = Some(slot_idx);
-                                            }
-                                            if slot_idx < 9 {
-                                                self.inventory.select_slot(slot_idx);
-                                            }
+                                        if !self.inventory.get_combined_slot(slot_idx).is_empty() {
+                                            self.inventory.held_slot = Some(slot_idx);
+                                        }
+                                        if slot_idx < 9 {
+                                            self.inventory.select_slot(slot_idx);
                                         }
                                     }
                                 }
@@ -421,6 +631,11 @@ impl ApplicationHandler for App {
                                             self.game_state = GameState::Playing;
                                             self.lock_cursor(true);
                                         }
+                                        "save" => {
+                                            self.save_current_world();
+                                            self.game_state = GameState::Playing;
+                                            self.lock_cursor(true);
+                                        }
                                         "toggle_mode" => {
                                             match self.game_mode {
                                                 GameMode::Survival => {
@@ -445,6 +660,7 @@ impl ApplicationHandler for App {
                                         }
                                         "settings" => self.game_state = GameState::Settings { from_main_menu: false },
                                         "title" => {
+                                            self.save_current_world();
                                             self.clear_active_gameplay_inputs();
                                             self.game_state = GameState::MainMenu;
                                             self.lock_cursor(false);
@@ -573,8 +789,19 @@ impl ApplicationHandler for App {
                     self.last_fps_update = now;
                 }
 
+                // Update status banner timer
+                if let Some((_, timer)) = &mut self.status_message {
+                    *timer -= dt;
+                    if *timer <= 0.0 {
+                        self.status_message = None;
+                    }
+                }
+
                 // Update game simulation if playing
                 if self.game_state == GameState::Playing {
+                    // Advance Day/Night cycle (1 full day = 480 seconds = 8 minutes)
+                    self.time_of_day = (self.time_of_day + dt / 480.0).rem_euclid(1.0);
+
                     let mut should_game_over = false;
                     let mut current_chunk = None;
 
@@ -590,6 +817,26 @@ impl ApplicationHandler for App {
                         }
                     }
 
+                    // Update Mobs (spawning, AI movement, Creeper explosions, Zombie combat)
+                    let p_pos = self.player.as_ref().map(|p| p.feet_pos()).unwrap_or(Vec3::ZERO);
+                    let (_, daylight) =
+                        crate::render::camera::Camera::sky_atmosphere(self.time_of_day, false);
+                    if let Some(player) = &mut self.player {
+                        self.mob_manager.update(
+                            &mut self.world,
+                            p_pos,
+                            &mut player.velocity,
+                            self.game_mode,
+                            &mut self.survival,
+                            &mut self.dropped_items,
+                            daylight,
+                            dt,
+                        );
+                    }
+                    if self.survival.is_dead() && self.game_mode == GameMode::Survival {
+                        should_game_over = true;
+                    }
+
                     if should_game_over {
                         self.clear_active_gameplay_inputs();
                         self.game_state = GameState::GameOver;
@@ -602,7 +849,6 @@ impl ApplicationHandler for App {
                     }
 
                     // Update dropped items
-                    let p_pos = self.player.as_ref().map(|p| p.feet_pos()).unwrap_or(Vec3::ZERO);
                     self.dropped_items.update(&self.world, p_pos, &mut self.inventory, dt);
 
                     // Raycast targeted block & survival block breaking loop
@@ -616,20 +862,49 @@ impl ApplicationHandler for App {
                     }
 
                     if self.is_lmb_down && self.game_mode == GameMode::Survival && self.cursor_locked {
+                        if let Some(player) = &mut self.player {
+                            if player.swing_timer <= 0.0 {
+                                player.trigger_swing();
+                            }
+                        }
+
                         if let Some((bx, by, bz)) = self.targeted_block {
                             let target_block = self.world.get_block(bx, by, bz);
 
-                            if target_block != crate::voxel::block::BlockType::Air {
+                            if target_block.is_targetable() {
                                 if self.breaking_block == Some((bx, by, bz)) {
-                                    let break_time = target_block.break_time();
-                                    if break_time.is_finite() {
-                                        self.break_progress += dt / break_time;
+                                    let base_time = target_block.break_time();
+                                    let tool_mult = self
+                                        .inventory
+                                        .selected_block()
+                                        .tool_speed_multiplier(target_block);
+                                    let effective_time = base_time / tool_mult;
+
+                                    if effective_time.is_finite() && effective_time > 0.0 {
+                                        self.break_progress += dt / effective_time;
                                         if self.break_progress >= 1.0 {
-                                            // Destroy block!
-                                            self.world.set_block(bx, by, bz, crate::voxel::block::BlockType::Air);
-                                            if let Some(drop) = target_block.drop_item() {
-                                                let drop_pos = Vec3::new(bx as f32 + 0.5, by as f32 + 0.5, bz as f32 + 0.5);
-                                                self.dropped_items.spawn(drop, drop_pos);
+                                            if target_block == BlockType::TNT {
+                                                let drops = self.world.explode(bx, by, bz, 3.0);
+                                                for (b, p) in drops {
+                                                    self.dropped_items.spawn(b, p);
+                                                }
+                                                self.show_status("BOOM! TNT Detonated!");
+                                            } else {
+                                                self.world.set_block(bx, by, bz, BlockType::Air);
+                                                let drop_pos = Vec3::new(
+                                                    bx as f32 + 0.5,
+                                                    by as f32 + 0.5,
+                                                    bz as f32 + 0.5,
+                                                );
+                                                if let Some(drop) = target_block.drop_item() {
+                                                    self.dropped_items.spawn(drop, drop_pos);
+                                                }
+                                                // Breaking Oak Leaves has a 25% chance to also drop a fresh Apple!
+                                                if target_block == BlockType::Leaves
+                                                    && ((bx.wrapping_mul(31) ^ by ^ bz.wrapping_mul(17)).unsigned_abs() % 4 == 0)
+                                                {
+                                                    self.dropped_items.spawn(BlockType::Apple, drop_pos);
+                                                }
                                             }
                                             self.breaking_block = None;
                                             self.break_progress = 0.0;
@@ -670,6 +945,11 @@ impl ApplicationHandler for App {
                     }
                     GameState::Playing => {
                         if let Some(player) = &self.player {
+                            let biome_name = self
+                                .world
+                                .biome_at(player.position.x.floor() as i32, player.position.z.floor() as i32)
+                                .name();
+                            let status_str = self.status_message.as_ref().map(|(s, _)| s.as_str());
                             MenuRenderer::render_hud(
                                 &mut self.ui_batch,
                                 win_w,
@@ -681,16 +961,25 @@ impl ApplicationHandler for App {
                                 player.position,
                                 self.break_progress,
                                 player.is_crouching,
+                                player.head_underwater,
+                                biome_name,
+                                self.time_of_day,
+                                self.mob_manager.mobs.len(),
+                                status_str,
                             );
                         }
                     }
                     GameState::Inventory => {
+                        let near_table = self.is_station_nearby(BlockType::CraftingTable);
+                        let near_furnace = self.is_station_nearby(BlockType::Furnace);
                         MenuRenderer::render_inventory(
                             &mut self.ui_batch,
                             win_w,
                             win_h,
                             &self.inventory,
                             self.game_mode,
+                            near_table,
+                            near_furnace,
                             self.mouse_pos,
                         );
                     }
@@ -735,14 +1024,30 @@ impl ApplicationHandler for App {
                         } else {
                             None
                         };
-                        let item_mesh = self
+                        let mut item_mesh = self
                             .dropped_items
                             .generate_mesh_with_highlight(highlight_target, self.break_progress);
+
+                        if render_3d {
+                            self.mob_manager.append_mob_and_hand_meshes(
+                                &mut item_mesh.0,
+                                &mut item_mesh.1,
+                                player.camera.position,
+                                player.camera.front(),
+                                player.camera.right(),
+                                player.camera.up(),
+                                self.inventory.selected_block(),
+                                player.swing_timer,
+                                player.walk_bob,
+                            );
+                        }
 
                         match renderer.render(
                             &player.camera,
                             view_dist_blocks,
                             self.settings.fog_enabled,
+                            self.time_of_day,
+                            player.head_underwater,
                             render_3d,
                             &item_mesh,
                             &self.ui_batch,

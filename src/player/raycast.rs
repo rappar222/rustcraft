@@ -60,7 +60,7 @@ pub fn raycast_voxels(
     let mut t_curr = 0.0;
 
     while t_curr <= max_dist {
-        if world.get_block(current_x, current_y, current_z).is_solid() {
+        if world.get_block(current_x, current_y, current_z).is_targetable() {
             return Some(RaycastHit {
                 block_pos: (current_x, current_y, current_z),
                 face_normal: normal,

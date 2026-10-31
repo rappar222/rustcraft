@@ -2,7 +2,7 @@ struct CameraUniform {
     view_proj: mat4x4<f32>,
     cam_pos: vec4<f32>,
     fog_color: vec4<f32>,
-    fog_info: vec4<f32>, // min_dist, max_dist
+    fog_info: vec4<f32>, // [min_dist, max_dist, daylight_factor, is_underwater]
 };
 
 @group(0) @binding(0)
@@ -54,7 +54,13 @@ fn vs_main(in: VertexInput) -> VertexOutput {
         face_light = 0.70; // -Z
     }
 
-    out.light_factor = face_light * in.ao;
+    let daylight = camera.fog_info.z;
+    // Emissive / torch-lit vertices have ao > 1.0, keeping caves & night builds illuminated!
+    let emit_light = clamp((in.ao - 0.85) * 1.4, 0.0, 1.15);
+    let env_light = max(daylight, emit_light);
+    let base_ao = min(in.ao, 1.05);
+
+    out.light_factor = face_light * base_ao * env_light;
     out.world_dist = distance(world_pos, camera.cam_pos.xyz);
 
     return out;
@@ -64,7 +70,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let tex_color = textureSample(t_array, s_array, in.uv, in.tex_layer);
 
-    // Alpha cutout for transparent blocks (leaves, glass)
+    // Alpha cutout for transparent blocks/items (leaves, glass, tools, torches)
     if (tex_color.a < 0.1) {
         discard;
     }

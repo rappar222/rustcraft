@@ -141,6 +141,35 @@ impl UiBatch {
         self.draw_rect_outline(x, y, size, size, 1.0, [0.05, 0.05, 0.05, 1.0]);
     }
 
+    pub fn draw_hunger_icon(&mut self, x: f32, y: f32, size: f32, is_half: bool, is_empty: bool) {
+        let bg_color = [0.15, 0.12, 0.08, 0.9];
+        self.draw_rect(x, y, size, size, bg_color);
+
+        if !is_empty {
+            let food_color = [0.82, 0.48, 0.18, 1.0]; // Golden-brown drumstick
+            let fill_w = if is_half { size * 0.5 } else { size - 2.0 };
+            self.draw_rect(x + 1.0, y + 1.0, fill_w, size - 2.0, food_color);
+            // Small bone tip highlight
+            self.draw_rect(x + size - 4.0, y + size - 4.0, 3.0, 3.0, [0.95, 0.92, 0.85, 1.0]);
+        }
+
+        self.draw_rect_outline(x, y, size, size, 1.0, [0.08, 0.05, 0.02, 1.0]);
+    }
+
+    pub fn draw_bubble_icon(&mut self, x: f32, y: f32, size: f32, is_empty: bool) {
+        let bg_color = [0.05, 0.15, 0.28, 0.85];
+        self.draw_rect(x, y, size, size, bg_color);
+
+        if !is_empty {
+            let bubble_color = [0.35, 0.78, 1.0, 0.95];
+            self.draw_rect(x + 1.0, y + 1.0, size - 2.0, size - 2.0, bubble_color);
+            // Specular highlight dot
+            self.draw_rect(x + 2.0, y + 2.0, 3.0, 3.0, [0.9, 0.98, 1.0, 1.0]);
+        }
+
+        self.draw_rect_outline(x, y, size, size, 1.0, [0.1, 0.35, 0.65, 1.0]);
+    }
+
     pub fn draw_crosshair(&mut self, screen_w: f32, screen_h: f32) {
         let cx = screen_w * 0.5;
         let cy = screen_h * 0.5;

@@ -1,3 +1,4 @@
+use crate::voxel::block::BlockType;
 use crate::voxel::world::World;
 use glam::Vec3;
 
@@ -28,6 +29,14 @@ impl Aabb {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EnvironmentContact {
+    pub on_ground: bool,
+    pub in_water: bool,
+    pub in_lava: bool,
+    pub touching_cactus: bool,
+}
+
 pub struct Physics;
 
 impl Physics {
@@ -49,6 +58,34 @@ impl Physics {
         true
     }
 
+    pub fn check_environment(pos: Vec3, height: f32, world: &World) -> (bool, bool, bool) {
+        let half_w = Self::PLAYER_WIDTH * 0.5 + 0.05;
+        let min_x = (pos.x - half_w).floor() as i32;
+        let max_x = (pos.x + half_w).floor() as i32;
+        let min_y = pos.y.floor() as i32;
+        let max_y = (pos.y + height - 0.1).floor() as i32;
+        let min_z = (pos.z - half_w).floor() as i32;
+        let max_z = (pos.z + half_w).floor() as i32;
+
+        let mut in_water = false;
+        let mut in_lava = false;
+        let mut touching_cactus = false;
+
+        for y in min_y..=max_y {
+            for z in min_z..=max_z {
+                for x in min_x..=max_x {
+                    match world.get_block(x, y, z) {
+                        BlockType::Water => in_water = true,
+                        BlockType::Lava => in_lava = true,
+                        BlockType::Cactus => touching_cactus = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        (in_water, in_lava, touching_cactus)
+    }
+
     pub fn update_player(
         pos: &mut Vec3,
         vel: &mut Vec3,
@@ -57,7 +94,7 @@ impl Physics {
         flying: bool,
         crouching: bool,
         was_on_ground: bool,
-    ) -> bool {
+    ) -> EnvironmentContact {
         let half_w = Self::PLAYER_WIDTH * 0.5;
         let player_h = if crouching && !flying {
             Self::PLAYER_HEIGHT_CROUCH
@@ -66,10 +103,23 @@ impl Physics {
         };
         let mut on_ground = false;
 
-        let damping = (-12.0 * dt).exp();
+        let (in_water, in_lava, _) = Self::check_environment(*pos, player_h, world);
+        let in_fluid = in_water || in_lava;
+
+        let damping = if in_fluid && !flying {
+            (-16.0 * dt).exp()
+        } else {
+            (-12.0 * dt).exp()
+        };
+
         if !flying {
-            // Apply gravity
-            vel.y = (vel.y - 26.0 * dt).max(-60.0);
+            if in_fluid {
+                // Gentle buoyancy / fluid sinking speed
+                vel.y = (vel.y - 7.5 * dt).clamp(-4.5, 6.0);
+            } else {
+                // Standard gravity
+                vel.y = (vel.y - 26.0 * dt).max(-60.0);
+            }
             vel.x *= damping;
             vel.z *= damping;
         } else {
@@ -82,19 +132,16 @@ impl Physics {
 
         // Crouch sneak: Ledge fall prevention (only when on ground!)
         if crouching && !flying && was_on_ground && Self::has_ground_below(*pos, half_w, world) {
-            // Check if moving on X steps off edge
             let test_x_pos = Vec3::new(pos.x + delta.x, pos.y, pos.z);
             if !Self::has_ground_below(test_x_pos, half_w, world) {
                 delta.x = 0.0;
                 vel.x = 0.0;
             }
-            // Check if moving on Z steps off edge
             let test_z_pos = Vec3::new(pos.x, pos.y, pos.z + delta.z);
             if !Self::has_ground_below(test_z_pos, half_w, world) {
                 delta.z = 0.0;
                 vel.z = 0.0;
             }
-            // Check combined diagonal XZ step off corner
             if delta.x != 0.0 && delta.z != 0.0 {
                 let test_xz_pos = Vec3::new(pos.x + delta.x, pos.y, pos.z + delta.z);
                 if !Self::has_ground_below(test_xz_pos, half_w, world) {
@@ -152,7 +199,14 @@ impl Physics {
             }
         }
 
-        on_ground
+        let (post_water, post_lava, touching_cactus) = Self::check_environment(*pos, player_h, world);
+
+        EnvironmentContact {
+            on_ground,
+            in_water: in_water || post_water,
+            in_lava: in_lava || post_lava,
+            touching_cactus,
+        }
     }
 
     pub fn has_ground_below(pos: Vec3, half_w: f32, world: &World) -> bool {

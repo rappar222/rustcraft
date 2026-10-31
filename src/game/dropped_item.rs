@@ -60,6 +60,21 @@ impl DroppedItemManager {
         });
     }
 
+    pub fn spawn_thrown(&mut self, block: BlockType, pos: Vec3, dir: Vec3) {
+        if block == BlockType::Air {
+            return;
+        }
+        self.items.push(DroppedItem {
+            position: pos,
+            velocity: dir * 5.2 + Vec3::new(0.0, 2.0, 0.0),
+            block,
+            count: 1,
+            rotation: 0.0,
+            age: 0.0,
+            pickup_delay: 1.25,
+        });
+    }
+
     pub fn update(
         &mut self,
         world: &World,
@@ -75,7 +90,7 @@ impl DroppedItemManager {
             let mut b = a + 1;
             while b < self.items.len() {
                 if self.items[a].block == self.items[b].block
-                    && self.items[a].count + self.items[b].count <= 64
+                    && self.items[a].count + self.items[b].count <= self.items[a].block.max_stack_size()
                     && self.items[a].age > 0.35
                     && self.items[b].age > 0.35
                     && (self.items[a].position - self.items[b].position).length_squared() < 0.45

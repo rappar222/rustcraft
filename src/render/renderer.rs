@@ -178,6 +178,8 @@ impl Renderer {
         camera: &Camera,
         view_distance_blocks: f32,
         fog_enabled: bool,
+        time_of_day: f32,
+        is_underwater: bool,
         render_3d: bool,
         item_mesh: &(Vec<crate::render::vertex::BlockVertex>, Vec<u32>),
         ui_batch: &UiBatch,
@@ -194,7 +196,7 @@ impl Renderer {
         let view = surface_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Update camera uniform
-        let camera_uniform = camera.to_uniform(view_distance_blocks, fog_enabled);
+        let camera_uniform = camera.to_uniform(view_distance_blocks, fog_enabled, time_of_day, is_underwater);
         self.queue.write_buffer(
             &self.pipeline_state.camera_buffer,
             0,
@@ -211,6 +213,7 @@ impl Renderer {
         let mut rendered_chunks = 0;
         let cam_pos = camera.position;
         let cam_front = camera.front();
+        let sky = camera_uniform.fog_color;
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -220,9 +223,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.65,
-                            g: 0.82,
-                            b: 1.0,
+                            r: sky[0] as f64,
+                            g: sky[1] as f64,
+                            b: sky[2] as f64,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,

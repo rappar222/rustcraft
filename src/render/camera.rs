@@ -7,7 +7,7 @@ pub struct CameraUniform {
     pub view_proj: [f32; 16],
     pub cam_pos: [f32; 4],
     pub fog_color: [f32; 4],
-    pub fog_info: [f32; 4], // [min_dist, max_dist, 0.0, 0.0]
+    pub fog_info: [f32; 4], // [min_dist, max_dist, daylight_factor, is_underwater]
 }
 
 pub struct Camera {
@@ -81,10 +81,56 @@ impl Camera {
         proj * view
     }
 
-    pub fn to_uniform(&self, view_distance_blocks: f32, fog_enabled: bool) -> CameraUniform {
+    /// Compute sky color and daylight factor (0.20..1.0) from `time_of_day` in 0.0..1.0
+    /// (0.0 = Dawn, 0.25 = Noon, 0.5 = Dusk, 0.75 = Midnight)
+    pub fn sky_atmosphere(time_of_day: f32, is_underwater: bool) -> ([f32; 4], f32) {
+        let angle = time_of_day * std::f32::consts::TAU;
+        let sun_height = angle.sin(); // +1 at noon (0.25), -1 at midnight (0.75)
+        let daylight = ((sun_height + 0.25) / 1.25).clamp(0.20, 1.0);
+
+        if is_underwater {
+            let uw_b = 0.45 * daylight + 0.12;
+            return ([0.04, 0.18 * daylight + 0.04, uw_b, 1.0], daylight * 0.85);
+        }
+
+        let sky_rgb = if sun_height > 0.15 {
+            // Day
+            let t = ((sun_height - 0.15) / 0.85).clamp(0.0, 1.0);
+            [
+                0.75 * (1.0 - t) + 0.56 * t,
+                0.62 * (1.0 - t) + 0.78 * t,
+                0.55 * (1.0 - t) + 0.98 * t,
+            ]
+        } else if sun_height > -0.18 {
+            // Sunrise / Sunset golden-orange glow
+            let t = ((sun_height + 0.18) / 0.33).clamp(0.0, 1.0);
+            [
+                0.10 * (1.0 - t) + 0.78 * t,
+                0.10 * (1.0 - t) + 0.52 * t,
+                0.22 * (1.0 - t) + 0.48 * t,
+            ]
+        } else {
+            // Night sky
+            [0.04, 0.06, 0.14]
+        };
+
+        ([sky_rgb[0], sky_rgb[1], sky_rgb[2], 1.0], daylight)
+    }
+
+    pub fn to_uniform(
+        &self,
+        view_distance_blocks: f32,
+        fog_enabled: bool,
+        time_of_day: f32,
+        is_underwater: bool,
+    ) -> CameraUniform {
         let view_proj = self.build_view_projection_matrix();
-        let (fog_min, fog_max) = if fog_enabled {
-            (view_distance_blocks * 0.60, view_distance_blocks * 0.98)
+        let (fog_color, daylight) = Self::sky_atmosphere(time_of_day, is_underwater);
+
+        let (fog_min, fog_max) = if is_underwater {
+            (3.0, 26.0)
+        } else if fog_enabled {
+            (view_distance_blocks * 0.58, view_distance_blocks * 0.98)
         } else {
             (99999.0, 100000.0)
         };
@@ -92,8 +138,13 @@ impl Camera {
         CameraUniform {
             view_proj: view_proj.to_cols_array(),
             cam_pos: [self.position.x, self.position.y, self.position.z, 1.0],
-            fog_color: [0.65, 0.82, 1.0, 1.0], // Sky blue
-            fog_info: [fog_min, fog_max, 0.0, 0.0],
+            fog_color,
+            fog_info: [
+                fog_min,
+                fog_max,
+                daylight,
+                if is_underwater { 1.0 } else { 0.0 },
+            ],
         }
     }
 }
