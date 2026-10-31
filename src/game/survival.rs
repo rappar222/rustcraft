@@ -35,7 +35,12 @@ impl SurvivalState {
     pub fn update(&mut self, player_pos: Vec3, on_ground: bool, dt: f32) -> bool {
         self.time_since_damage += dt;
 
-        // Slow natural regeneration if above half health and no recent damage
+        // Void damage if falling below bedrock
+        if player_pos.y < -12.0 {
+            self.take_damage(12.0 * dt);
+        }
+
+        // Slow natural regeneration if no recent damage
         if self.time_since_damage > 4.0 && self.health < self.max_health && self.health > 0.0 {
             self.health = (self.health + 0.5 * dt).min(self.max_health);
         }

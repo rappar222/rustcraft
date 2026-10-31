@@ -1,26 +1,36 @@
 use crate::voxel::world::World;
 use glam::Vec3;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RaycastHit {
     pub block_pos: (i32, i32, i32),
-    #[allow(dead_code)]
     pub face_normal: (i32, i32, i32),
     pub adjacent_pos: (i32, i32, i32),
 }
 
-pub fn raycast_voxels(origin: Vec3, direction: Vec3, max_dist: f32, world: &World) -> Option<RaycastHit> {
+pub fn raycast_voxels(
+    origin: Vec3,
+    direction: Vec3,
+    max_dist: f32,
+    world: &World,
+) -> Option<RaycastHit> {
+    let dir_len = direction.length();
+    if dir_len < 1e-6 {
+        return None;
+    }
+    let dir = direction / dir_len;
+
     let mut current_x = origin.x.floor() as i32;
     let mut current_y = origin.y.floor() as i32;
     let mut current_z = origin.z.floor() as i32;
 
-    let step_x = if direction.x > 0.0 { 1 } else if direction.x < 0.0 { -1 } else { 0 };
-    let step_y = if direction.y > 0.0 { 1 } else if direction.y < 0.0 { -1 } else { 0 };
-    let step_z = if direction.z > 0.0 { 1 } else if direction.z < 0.0 { -1 } else { 0 };
+    let step_x = if dir.x > 0.0 { 1 } else if dir.x < 0.0 { -1 } else { 0 };
+    let step_y = if dir.y > 0.0 { 1 } else if dir.y < 0.0 { -1 } else { 0 };
+    let step_z = if dir.z > 0.0 { 1 } else if dir.z < 0.0 { -1 } else { 0 };
 
-    let inv_dx = if direction.x != 0.0 { 1.0 / direction.x.abs() } else { f32::MAX };
-    let inv_dy = if direction.y != 0.0 { 1.0 / direction.y.abs() } else { f32::MAX };
-    let inv_dz = if direction.z != 0.0 { 1.0 / direction.z.abs() } else { f32::MAX };
+    let inv_dx = if dir.x.abs() > 1e-6 { 1.0 / dir.x.abs() } else { f32::MAX };
+    let inv_dy = if dir.y.abs() > 1e-6 { 1.0 / dir.y.abs() } else { f32::MAX };
+    let inv_dz = if dir.z.abs() > 1e-6 { 1.0 / dir.z.abs() } else { f32::MAX };
 
     let mut t_max_x = if step_x > 0 {
         ((current_x as f32 + 1.0) - origin.x) * inv_dx
@@ -47,8 +57,9 @@ pub fn raycast_voxels(origin: Vec3, direction: Vec3, max_dist: f32, world: &Worl
     };
 
     let mut normal = (0, 0, 0);
+    let mut t_curr = 0.0;
 
-    while t_max_x.min(t_max_y).min(t_max_z) <= max_dist {
+    while t_curr <= max_dist {
         if world.get_block(current_x, current_y, current_z).is_solid() {
             return Some(RaycastHit {
                 block_pos: (current_x, current_y, current_z),
@@ -63,24 +74,26 @@ pub fn raycast_voxels(origin: Vec3, direction: Vec3, max_dist: f32, world: &Worl
 
         if t_max_x < t_max_y {
             if t_max_x < t_max_z {
+                t_curr = t_max_x;
                 current_x += step_x;
                 t_max_x += inv_dx;
                 normal = (-step_x, 0, 0);
             } else {
+                t_curr = t_max_z;
                 current_z += step_z;
                 t_max_z += inv_dz;
                 normal = (0, 0, -step_z);
             }
+        } else if t_max_y < t_max_z {
+            t_curr = t_max_y;
+            current_y += step_y;
+            t_max_y += inv_dy;
+            normal = (0, -step_y, 0);
         } else {
-            if t_max_y < t_max_z {
-                current_y += step_y;
-                t_max_y += inv_dy;
-                normal = (0, -step_y, 0);
-            } else {
-                current_z += step_z;
-                t_max_z += inv_dz;
-                normal = (0, 0, -step_z);
-            }
+            t_curr = t_max_z;
+            current_z += step_z;
+            t_max_z += inv_dz;
+            normal = (0, 0, -step_z);
         }
     }
 
