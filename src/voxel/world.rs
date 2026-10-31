@@ -42,6 +42,15 @@ impl World {
         }
     }
 
+    pub fn get_surface_height(&self, x: i32, z: i32) -> i32 {
+        for y in (0..CHUNK_HEIGHT as i32).rev() {
+            if self.get_block(x, y, z).is_solid() {
+                return y;
+            }
+        }
+        45
+    }
+
     pub fn set_block(&mut self, x: i32, y: i32, z: i32, block: BlockType) -> bool {
         if y < 0 || y >= CHUNK_HEIGHT as i32 {
             return false;

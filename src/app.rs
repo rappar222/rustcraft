@@ -79,11 +79,17 @@ impl App {
         }
     }
 
+    fn get_safe_spawn_pos(&self) -> Vec3 {
+        let spawn_x = 0;
+        let spawn_z = 0;
+        let ground_y = self.world.get_surface_height(spawn_x, spawn_z);
+        Vec3::new(spawn_x as f32 + 0.5, ground_y as f32 + 1.001, spawn_z as f32 + 0.5)
+    }
+
     fn ensure_world_generated(&mut self) {
         if !self.world_generated {
             println!("Generating initial world chunks for radius {}...", self.settings.render_distance);
-            let spawn_pos = Vec3::new(0.0, 52.0, 0.0);
-            let spawn_chunk = ChunkPos::from_block_coords(spawn_pos.x as i32, spawn_pos.z as i32);
+            let spawn_chunk = ChunkPos::from_block_coords(0, 0);
             self.world.generate_chunks_around(spawn_chunk, self.settings.render_distance);
             self.last_player_chunk = Some(spawn_chunk);
 
@@ -98,11 +104,15 @@ impl App {
         self.game_mode = mode;
         self.ensure_world_generated();
 
+        let spawn_pos = self.get_safe_spawn_pos();
+
         if let Some(player) = &mut self.player {
+            player.respawn(spawn_pos);
             player.is_flying = mode == GameMode::Creative;
+            player.on_ground = true;
         }
 
-        self.survival.reset();
+        self.survival.reset(spawn_pos.y);
         self.game_state = GameState::Playing;
         self.lock_cursor(true);
     }
@@ -218,10 +228,11 @@ impl ApplicationHandler for App {
                         }
                         GameState::GameOver => {
                             if pressed && key_code == KeyCode::Space {
+                                let spawn_pos = self.get_safe_spawn_pos();
                                 if let Some(player) = &mut self.player {
-                                    player.respawn(Vec3::new(0.0, 52.0, 0.0));
+                                    player.respawn(spawn_pos);
                                 }
-                                self.survival.reset();
+                                self.survival.reset(spawn_pos.y);
                                 self.game_state = GameState::Playing;
                                 self.lock_cursor(true);
                             }
@@ -396,10 +407,11 @@ impl ApplicationHandler for App {
                                 if mx >= bx && mx <= bx + bw && my >= by && my <= by + bh {
                                     match id.as_str() {
                                         "respawn" => {
+                                            let spawn_pos = self.get_safe_spawn_pos();
                                             if let Some(player) = &mut self.player {
-                                                player.respawn(Vec3::new(0.0, 52.0, 0.0));
+                                                player.respawn(spawn_pos);
                                             }
-                                            self.survival.reset();
+                                            self.survival.reset(spawn_pos.y);
                                             self.game_state = GameState::Playing;
                                             self.lock_cursor(true);
                                         }

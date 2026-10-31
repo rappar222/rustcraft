@@ -17,9 +17,9 @@ impl SurvivalState {
         }
     }
 
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self, current_y: f32) {
         self.health = self.max_health;
-        self.highest_fall_y = 0.0;
+        self.highest_fall_y = current_y;
         self.time_since_damage = 0.0;
     }
 

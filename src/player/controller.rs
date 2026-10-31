@@ -49,7 +49,7 @@ impl PlayerController {
     pub fn respawn(&mut self, spawn_pos: Vec3) {
         self.camera.position = Vec3::new(spawn_pos.x, spawn_pos.y + Physics::EYE_HEIGHT, spawn_pos.z);
         self.velocity = Vec3::ZERO;
-        self.on_ground = false;
+        self.on_ground = true;
         self.is_flying = false;
     }
 
