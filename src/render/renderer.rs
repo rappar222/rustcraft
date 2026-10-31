@@ -179,6 +179,7 @@ impl Renderer {
         view_distance_blocks: f32,
         fog_enabled: bool,
         render_3d: bool,
+        item_mesh: &(Vec<crate::render::vertex::BlockVertex>, Vec<u32>),
         ui_batch: &UiBatch,
     ) -> Result<usize, RenderError> {
         let surface_texture = match self.surface.get_current_texture() {
@@ -267,6 +268,24 @@ impl Renderer {
                     render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     render_pass.draw_indexed(0..mesh.index_count, 0, 0..1);
                     rendered_chunks += 1;
+                }
+
+                // Draw 3D Dropped Items (spinning, floating mini-cubes!)
+                if !item_mesh.1.is_empty() {
+                    let item_vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Dropped Item Vertex Buffer"),
+                        contents: bytemuck::cast_slice(&item_mesh.0),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    let item_ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Dropped Item Index Buffer"),
+                        contents: bytemuck::cast_slice(&item_mesh.1),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+
+                    render_pass.set_vertex_buffer(0, item_vb.slice(..));
+                    render_pass.set_index_buffer(item_ib.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..item_mesh.1.len() as u32, 0, 0..1);
                 }
             }
 

@@ -13,10 +13,10 @@ impl MenuRenderer {
         screen_h: f32,
         mouse_pos: (f32, f32),
     ) -> Vec<(String, f32, f32, f32, f32)> {
-        // Tiled or gradient background
+        // Background
         batch.draw_rect(0.0, 0.0, screen_w, screen_h, [0.12, 0.14, 0.18, 1.0]);
 
-        // Decorative dirt pattern or gradient header
+        // Header bar
         batch.draw_rect(0.0, 0.0, screen_w, 140.0, [0.08, 0.09, 0.12, 1.0]);
         batch.draw_rect(0.0, 140.0, screen_w, 4.0, [0.25, 0.35, 0.50, 1.0]);
 
@@ -79,13 +79,35 @@ impl MenuRenderer {
         survival: &SurvivalState,
         fps: f32,
         pos: glam::Vec3,
+        break_progress: f32,
+        is_crouching: bool,
     ) {
         // Crosshair at screen center
         batch.draw_crosshair(screen_w, screen_h);
 
+        // Block breaking progress bar below crosshair
+        if break_progress > 0.0 {
+            let bar_w = 52.0;
+            let bar_h = 7.0;
+            let bar_x = (screen_w - bar_w) * 0.5;
+            let bar_y = screen_h * 0.5 + 16.0;
+
+            // Background & border
+            batch.draw_rect(bar_x - 1.0, bar_y - 1.0, bar_w + 2.0, bar_h + 2.0, [0.0, 0.0, 0.0, 0.85]);
+            // Progress fill (red to green)
+            let fill_color = [1.0 - break_progress * 0.4, 0.2 + break_progress * 0.8, 0.1, 0.95];
+            batch.draw_rect(bar_x, bar_y, bar_w * break_progress.clamp(0.0, 1.0), bar_h, fill_color);
+        }
+
         // Top-left HUD info
         let mode_str = match game_mode {
-            GameMode::Survival => "Mode: SURVIVAL",
+            GameMode::Survival => {
+                if is_crouching {
+                    "Mode: SURVIVAL [CROUCHING]"
+                } else {
+                    "Mode: SURVIVAL"
+                }
+            }
             GameMode::Creative => "Mode: CREATIVE (Fly: [F])",
         };
         batch.draw_text(mode_str, 16.0, 16.0, 2.0, [1.0, 1.0, 1.0, 0.9]);
@@ -139,18 +161,38 @@ impl MenuRenderer {
             let thick = if is_selected { 3.0 } else { 1.5 };
             batch.draw_rect_outline(sx, hotbar_y, slot_size, slot_size, thick, border_color);
 
-            // Block icon inside slot
-            let block = inventory.hotbar[i];
-            let layer = block.texture_layer(2); // Top face
-            batch.draw_block_icon(sx + 4.0, hotbar_y + 4.0, slot_size - 8.0, layer);
+            // Block icon inside slot (if slot is not empty)
+            let stack = inventory.hotbar[i];
+            if !stack.is_empty() {
+                let layer = stack.block.texture_layer(2); // Top face
+                batch.draw_block_icon(sx + 4.0, hotbar_y + 4.0, slot_size - 8.0, layer);
+
+                // In survival, draw stack count in bottom-right corner!
+                if game_mode == GameMode::Survival {
+                    let count_str = stack.count.to_string();
+                    let cnt_w = count_str.len() as f32 * 8.0;
+                    let cx = sx + slot_size - cnt_w - 2.0;
+                    let cy = hotbar_y + slot_size - 10.0;
+                    batch.draw_text(&count_str, cx + 1.0, cy + 1.0, 1.0, [0.0, 0.0, 0.0, 0.9]);
+                    batch.draw_text(&count_str, cx, cy, 1.0, [1.0, 1.0, 1.0, 1.0]);
+                }
+            }
 
             // Slot number 1..9
             let num_str = (i + 1).to_string();
-            batch.draw_text(&num_str, sx + 3.0, hotbar_y + 2.0, 1.0, [1.0, 1.0, 1.0, 0.7]);
+            batch.draw_text(&num_str, sx + 3.0, hotbar_y + 2.0, 1.0, [1.0, 1.0, 1.0, 0.6]);
         }
 
         // Active block name above hotbar
-        let sel_name = format!("{:?}", inventory.selected_block());
+        let sel_stack = inventory.selected_stack();
+        let sel_name = if sel_stack.is_empty() {
+            "Empty Hand".to_string()
+        } else if game_mode == GameMode::Survival {
+            format!("{:?} ({})", sel_stack.block, sel_stack.count)
+        } else {
+            format!("{:?}", sel_stack.block)
+        };
+
         let sel_scale = 1.5;
         let name_w = sel_name.len() as f32 * 8.0 * sel_scale;
         let name_x = (screen_w - name_w) * 0.5;
@@ -163,6 +205,7 @@ impl MenuRenderer {
         screen_w: f32,
         screen_h: f32,
         inventory: &Inventory,
+        game_mode: GameMode,
         mouse_pos: (f32, f32),
     ) -> (Option<usize>, Option<usize>) {
         // Dark translucent overlay
@@ -179,15 +222,23 @@ impl MenuRenderer {
         batch.draw_rect_outline(win_x, win_y, win_w, win_h, 3.0, [0.50, 0.50, 0.55, 1.0]);
 
         // Title
-        let title = "CREATIVE INVENTORY & PALETTE";
+        let title = if game_mode == GameMode::Creative {
+            "CREATIVE INVENTORY & PALETTE"
+        } else {
+            "SURVIVAL INVENTORY (HOTBAR)"
+        };
         let title_w = title.len() as f32 * 8.0 * 2.0;
         batch.draw_text(title, win_x + (win_w - title_w) * 0.5, win_y + 20.0, 2.0, [1.0, 1.0, 0.6, 1.0]);
 
-        let help = "Click a block in the palette to assign to active hotbar slot";
+        let help = if game_mode == GameMode::Creative {
+            "Click any block in the palette to assign to active hotbar slot"
+        } else {
+            "Gather blocks by breaking terrain. Items will drop and be collected."
+        };
         let help_w = help.len() as f32 * 8.0 * 1.2;
         batch.draw_text(help, win_x + (win_w - help_w) * 0.5, win_y + 48.0, 1.2, [0.75, 0.75, 0.75, 0.9]);
 
-        // Palette grid (2 rows of 5 blocks)
+        // Palette grid (2 rows of 5 blocks) - interactive in Creative
         let slot_size = 56.0;
         let spacing = 68.0;
         let start_x = win_x + (win_w - 5.0 * spacing) * 0.5 + 6.0;
@@ -206,13 +257,21 @@ impl MenuRenderer {
                 && mouse_pos.1 >= sy
                 && mouse_pos.1 <= sy + slot_size;
 
-            if is_hover {
+            if is_hover && game_mode == GameMode::Creative {
                 clicked_palette = Some(idx);
             }
 
-            let bg = if is_hover { [0.45, 0.55, 0.75, 1.0] } else { [0.15, 0.15, 0.18, 1.0] };
+            let bg = if is_hover && game_mode == GameMode::Creative {
+                [0.45, 0.55, 0.75, 1.0]
+            } else {
+                [0.15, 0.15, 0.18, 1.0]
+            };
             batch.draw_rect(sx, sy, slot_size, slot_size, bg);
-            let border = if is_hover { [1.0, 1.0, 0.5, 1.0] } else { [0.35, 0.35, 0.40, 1.0] };
+            let border = if is_hover && game_mode == GameMode::Creative {
+                [1.0, 1.0, 0.5, 1.0]
+            } else {
+                [0.35, 0.35, 0.40, 1.0]
+            };
             batch.draw_rect_outline(sx, sy, slot_size, slot_size, 2.0, border);
 
             // Block preview
@@ -265,9 +324,19 @@ impl MenuRenderer {
             batch.draw_rect_outline(sx, hb_start_y, hb_size, hb_size, if is_selected { 3.0 } else { 1.5 }, border);
 
             // Block preview
-            let block = inventory.hotbar[i];
-            let layer = block.texture_layer(2);
-            batch.draw_block_icon(sx + 5.0, hb_start_y + 5.0, hb_size - 10.0, layer);
+            let stack = inventory.hotbar[i];
+            if !stack.is_empty() {
+                let layer = stack.block.texture_layer(2);
+                batch.draw_block_icon(sx + 5.0, hb_start_y + 5.0, hb_size - 10.0, layer);
+
+                if game_mode == GameMode::Survival {
+                    let count_str = stack.count.to_string();
+                    let cx = sx + hb_size - count_str.len() as f32 * 8.0 - 3.0;
+                    let cy = hb_start_y + hb_size - 11.0;
+                    batch.draw_text(&count_str, cx + 1.0, cy + 1.0, 1.0, [0.0, 0.0, 0.0, 0.9]);
+                    batch.draw_text(&count_str, cx, cy, 1.0, [1.0, 1.0, 1.0, 1.0]);
+                }
+            }
 
             // Number
             batch.draw_text(&(i + 1).to_string(), sx + 3.0, hb_start_y + 2.0, 1.0, [1.0, 1.0, 1.0, 0.8]);

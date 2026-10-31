@@ -6,7 +6,6 @@ use crate::render::camera::Camera;
 use crate::voxel::block::BlockType;
 use crate::voxel::world::World;
 use glam::Vec3;
-use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
 pub struct PlayerController {
@@ -14,6 +13,8 @@ pub struct PlayerController {
     pub velocity: Vec3,
     pub on_ground: bool,
     pub is_flying: bool,
+    pub is_crouching: bool,
+    pub eye_height: f32,
 
     // Input states
     pub forward: bool,
@@ -27,14 +28,17 @@ pub struct PlayerController {
 
 impl PlayerController {
     pub fn new(spawn_pos: Vec3, aspect: f32, initial_mode: GameMode) -> Self {
+        let initial_eye = Physics::EYE_HEIGHT_STAND;
         Self {
             camera: Camera::new(
-                Vec3::new(spawn_pos.x, spawn_pos.y + Physics::EYE_HEIGHT, spawn_pos.z),
+                Vec3::new(spawn_pos.x, spawn_pos.y + initial_eye, spawn_pos.z),
                 aspect,
             ),
             velocity: Vec3::ZERO,
             on_ground: false,
             is_flying: initial_mode == GameMode::Creative,
+            is_crouching: false,
+            eye_height: initial_eye,
 
             forward: false,
             backward: false,
@@ -47,10 +51,12 @@ impl PlayerController {
     }
 
     pub fn respawn(&mut self, spawn_pos: Vec3) {
-        self.camera.position = Vec3::new(spawn_pos.x, spawn_pos.y + Physics::EYE_HEIGHT, spawn_pos.z);
+        self.eye_height = Physics::EYE_HEIGHT_STAND;
+        self.camera.position = Vec3::new(spawn_pos.x, spawn_pos.y + self.eye_height, spawn_pos.z);
         self.velocity = Vec3::ZERO;
         self.on_ground = true;
         self.is_flying = false;
+        self.is_crouching = false;
     }
 
     pub fn handle_key(&mut self, key: KeyCode, pressed: bool, game_mode: GameMode) {
@@ -78,40 +84,51 @@ impl PlayerController {
         self.camera.pitch = self.camera.pitch.clamp(-limit, limit);
     }
 
-    pub fn handle_mouse_click(&mut self, button: MouseButton, world: &mut World, block_to_place: BlockType) {
+    pub fn try_place_block(&mut self, world: &mut World, block_to_place: BlockType) -> bool {
+        if block_to_place == BlockType::Air {
+            return false;
+        }
+
         let origin = self.camera.position;
         let direction = self.camera.front();
 
-        if let Some(hit) = raycast_voxels(origin, direction, 7.0, world) {
-            match button {
-                MouseButton::Left => {
-                    let (bx, by, bz) = hit.block_pos;
-                    world.set_block(bx, by, bz, BlockType::Air);
-                }
-                MouseButton::Right => {
-                    let (ax, ay, az) = hit.adjacent_pos;
-                    let p_pos = Vec3::new(
-                        self.camera.position.x,
-                        self.camera.position.y - Physics::EYE_HEIGHT,
-                        self.camera.position.z,
-                    );
-                    let p_box = super::physics::Aabb::from_player_pos(
-                        p_pos,
-                        Physics::PLAYER_WIDTH * 0.5,
-                        Physics::PLAYER_HEIGHT,
-                    );
-                    let b_box = super::physics::Aabb::new(
-                        Vec3::new(ax as f32, ay as f32, az as f32),
-                        Vec3::new(ax as f32 + 1.0, ay as f32 + 1.0, az as f32 + 1.0),
-                    );
+        if let Some(hit) = raycast_voxels(origin, direction, 6.0, world) {
+            let (ax, ay, az) = hit.adjacent_pos;
+            let half_w = Physics::PLAYER_WIDTH * 0.5;
+            let player_h = if self.is_crouching { Physics::PLAYER_HEIGHT_CROUCH } else { Physics::PLAYER_HEIGHT_STAND };
 
-                    if !p_box.intersects(&b_box) {
-                        world.set_block(ax, ay, az, block_to_place);
-                    }
-                }
-                _ => (),
+            let p_pos = Vec3::new(
+                self.camera.position.x,
+                self.camera.position.y - self.eye_height,
+                self.camera.position.z,
+            );
+            let p_box = super::physics::Aabb::from_player_pos(p_pos, half_w, player_h);
+            let b_box = super::physics::Aabb::new(
+                Vec3::new(ax as f32, ay as f32, az as f32),
+                Vec3::new(ax as f32 + 1.0, ay as f32 + 1.0, az as f32 + 1.0),
+            );
+
+            if !p_box.intersects(&b_box) {
+                return world.set_block(ax, ay, az, block_to_place);
             }
         }
+        false
+    }
+
+    pub fn handle_instant_break(&mut self, world: &mut World) -> Option<(BlockType, Vec3)> {
+        let origin = self.camera.position;
+        let direction = self.camera.front();
+
+        if let Some(hit) = raycast_voxels(origin, direction, 6.0, world) {
+            let (bx, by, bz) = hit.block_pos;
+            let old_block = world.get_block(bx, by, bz);
+            if old_block != BlockType::Air {
+                world.set_block(bx, by, bz, BlockType::Air);
+                let drop_pos = Vec3::new(bx as f32 + 0.5, by as f32 + 0.5, bz as f32 + 0.5);
+                return Some((old_block, drop_pos));
+            }
+        }
+        None
     }
 
     pub fn update(
@@ -124,6 +141,17 @@ impl PlayerController {
         if game_mode == GameMode::Survival {
             self.is_flying = false;
         }
+
+        // Crouch when not flying and holding Shift
+        self.is_crouching = self.sneak && !self.is_flying;
+
+        // Smooth camera eye height dip on crouch
+        let target_eye = if self.is_crouching {
+            Physics::EYE_HEIGHT_CROUCH
+        } else {
+            Physics::EYE_HEIGHT_STAND
+        };
+        self.eye_height += (target_eye - self.eye_height) * (18.0 * dt).min(1.0);
 
         let mut move_dir = Vec3::ZERO;
         let front = Vec3::new(self.camera.yaw.cos(), 0.0, self.camera.yaw.sin()).normalize();
@@ -144,8 +172,10 @@ impl PlayerController {
 
         let speed = if self.is_flying {
             if self.sprint { 40.0 } else { 18.0 }
+        } else if self.is_crouching {
+            1.8 // Authentic slow sneak speed
         } else {
-            if self.sprint { 8.5 } else { 5.0 }
+            if self.sprint { 8.5 } else { 4.8 }
         };
 
         if move_dir.length_squared() > 0.001 {
@@ -163,7 +193,7 @@ impl PlayerController {
                 self.velocity.y = 0.0;
             }
         } else {
-            if self.jump && self.on_ground {
+            if self.jump && self.on_ground && !self.is_crouching {
                 self.velocity.y = 9.0;
                 self.on_ground = false;
             }
@@ -171,7 +201,7 @@ impl PlayerController {
 
         let mut feet_pos = Vec3::new(
             self.camera.position.x,
-            self.camera.position.y - Physics::EYE_HEIGHT,
+            self.camera.position.y - self.eye_height,
             self.camera.position.z,
         );
 
@@ -181,11 +211,12 @@ impl PlayerController {
             world,
             dt,
             self.is_flying,
+            self.is_crouching,
         );
 
         self.camera.position = Vec3::new(
             feet_pos.x,
-            feet_pos.y + Physics::EYE_HEIGHT,
+            feet_pos.y + self.eye_height,
             feet_pos.z,
         );
 

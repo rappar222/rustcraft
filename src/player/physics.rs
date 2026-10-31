@@ -32,8 +32,10 @@ pub struct Physics;
 
 impl Physics {
     pub const PLAYER_WIDTH: f32 = 0.6;
-    pub const PLAYER_HEIGHT: f32 = 1.8;
-    pub const EYE_HEIGHT: f32 = 1.62;
+    pub const PLAYER_HEIGHT_STAND: f32 = 1.8;
+    pub const PLAYER_HEIGHT_CROUCH: f32 = 1.45;
+    pub const EYE_HEIGHT_STAND: f32 = 1.62;
+    pub const EYE_HEIGHT_CROUCH: f32 = 1.28;
 
     pub fn update_player(
         pos: &mut Vec3,
@@ -41,8 +43,14 @@ impl Physics {
         world: &World,
         dt: f32,
         flying: bool,
+        crouching: bool,
     ) -> bool {
         let half_w = Self::PLAYER_WIDTH * 0.5;
+        let player_h = if crouching && !flying {
+            Self::PLAYER_HEIGHT_CROUCH
+        } else {
+            Self::PLAYER_HEIGHT_STAND
+        };
         let mut on_ground = false;
 
         if !flying {
@@ -57,12 +65,28 @@ impl Physics {
             vel.z *= 0.85;
         }
 
-        let delta = *vel * dt;
+        let mut delta = *vel * dt;
+
+        // Crouch sneak: Ledge fall prevention (classic Minecraft mechanic!)
+        if crouching && !flying {
+            // Check if moving on X steps off edge
+            let test_x_pos = Vec3::new(pos.x + delta.x, pos.y, pos.z);
+            if !Self::has_ground_below(test_x_pos, half_w, world) {
+                delta.x = 0.0;
+                vel.x = 0.0;
+            }
+            // Check if moving on Z steps off edge
+            let test_z_pos = Vec3::new(pos.x, pos.y, pos.z + delta.z);
+            if !Self::has_ground_below(test_z_pos, half_w, world) {
+                delta.z = 0.0;
+                vel.z = 0.0;
+            }
+        }
 
         // Move and collide on X
         pos.x += delta.x;
-        let mut p_box = Aabb::from_player_pos(*pos, half_w, Self::PLAYER_HEIGHT);
-        for b_box in Self::get_surrounding_block_aabbs(*pos, half_w, Self::PLAYER_HEIGHT, world) {
+        let mut p_box = Aabb::from_player_pos(*pos, half_w, player_h);
+        for b_box in Self::get_surrounding_block_aabbs(*pos, half_w, player_h, world) {
             if p_box.intersects(&b_box) {
                 if delta.x > 0.0 {
                     pos.x = b_box.min.x - half_w - 0.0001;
@@ -76,11 +100,11 @@ impl Physics {
 
         // Move and collide on Y
         pos.y += delta.y;
-        p_box = Aabb::from_player_pos(*pos, half_w, Self::PLAYER_HEIGHT);
-        for b_box in Self::get_surrounding_block_aabbs(*pos, half_w, Self::PLAYER_HEIGHT, world) {
+        p_box = Aabb::from_player_pos(*pos, half_w, player_h);
+        for b_box in Self::get_surrounding_block_aabbs(*pos, half_w, player_h, world) {
             if p_box.intersects(&b_box) {
                 if delta.y > 0.0 {
-                    pos.y = b_box.min.y - Self::PLAYER_HEIGHT - 0.0001;
+                    pos.y = b_box.min.y - player_h - 0.0001;
                 } else if delta.y < 0.0 {
                     pos.y = b_box.max.y + 0.0001;
                     on_ground = true;
@@ -92,8 +116,8 @@ impl Physics {
 
         // Move and collide on Z
         pos.z += delta.z;
-        p_box = Aabb::from_player_pos(*pos, half_w, Self::PLAYER_HEIGHT);
-        for b_box in Self::get_surrounding_block_aabbs(*pos, half_w, Self::PLAYER_HEIGHT, world) {
+        p_box = Aabb::from_player_pos(*pos, half_w, player_h);
+        for b_box in Self::get_surrounding_block_aabbs(*pos, half_w, player_h, world) {
             if p_box.intersects(&b_box) {
                 if delta.z > 0.0 {
                     pos.z = b_box.min.z - half_w - 0.0001;
@@ -106,6 +130,23 @@ impl Physics {
         }
 
         on_ground
+    }
+
+    fn has_ground_below(pos: Vec3, half_w: f32, world: &World) -> bool {
+        let min_x = (pos.x - half_w).floor() as i32;
+        let max_x = (pos.x + half_w).floor() as i32;
+        let min_z = (pos.z - half_w).floor() as i32;
+        let max_z = (pos.z + half_w).floor() as i32;
+        let check_y = (pos.y - 0.2).floor() as i32;
+
+        for z in min_z..=max_z {
+            for x in min_x..=max_x {
+                if world.get_block(x, check_y, z).is_solid() {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn get_surrounding_block_aabbs(

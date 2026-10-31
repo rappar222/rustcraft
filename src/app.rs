@@ -1,3 +1,4 @@
+use crate::game::dropped_item::DroppedItemManager;
 use crate::game::inventory::Inventory;
 use crate::game::settings::GraphicsSettings;
 use crate::game::state::{GameMode, GameState};
@@ -25,6 +26,10 @@ pub struct App {
     player: Option<PlayerController>,
     inventory: Inventory,
     survival: SurvivalState,
+    dropped_items: DroppedItemManager,
+    breaking_block: Option<(i32, i32, i32)>,
+    break_progress: f32,
+    is_lmb_down: bool,
     game_mode: GameMode,
     game_state: GameState,
     settings: GraphicsSettings,
@@ -46,10 +51,14 @@ impl App {
             renderer: None,
             world: World::new(42),
             player: None,
-            inventory: Inventory::new(),
+            inventory: Inventory::new_survival(),
             survival: SurvivalState::new(),
+            dropped_items: DroppedItemManager::new(),
+            breaking_block: None,
+            break_progress: 0.0,
+            is_lmb_down: false,
             game_mode: GameMode::Survival,
-            game_state: GameState::MainMenu, // Start at main menu!
+            game_state: GameState::MainMenu,
             settings: GraphicsSettings::default(),
             ui_batch: UiBatch::new(),
             mouse_pos: (0.0, 0.0),
@@ -103,6 +112,17 @@ impl App {
     fn start_game(&mut self, mode: GameMode) {
         self.game_mode = mode;
         self.ensure_world_generated();
+
+        // In Survival, player starts with an empty inventory; in Creative, with palette!
+        self.inventory = match mode {
+            GameMode::Survival => Inventory::new_survival(),
+            GameMode::Creative => Inventory::new_creative(),
+        };
+
+        self.dropped_items.clear();
+        self.breaking_block = None;
+        self.break_progress = 0.0;
+        self.is_lmb_down = false;
 
         let spawn_pos = self.get_safe_spawn_pos();
 
@@ -179,11 +199,17 @@ impl ApplicationHandler for App {
                             if pressed {
                                 match key_code {
                                     KeyCode::Escape => {
+                                        self.is_lmb_down = false;
+                                        self.breaking_block = None;
+                                        self.break_progress = 0.0;
                                         self.game_state = GameState::PauseMenu;
                                         self.lock_cursor(false);
                                         return;
                                     }
                                     KeyCode::KeyE => {
+                                        self.is_lmb_down = false;
+                                        self.breaking_block = None;
+                                        self.break_progress = 0.0;
                                         self.game_state = GameState::Inventory;
                                         self.lock_cursor(false);
                                         return;
@@ -241,11 +267,12 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if state == ElementState::Pressed {
-                    let (mx, my) = self.mouse_pos;
+                let is_pressed = state == ElementState::Pressed;
+                let (mx, my) = self.mouse_pos;
 
-                    match self.game_state {
-                        GameState::MainMenu => {
+                match self.game_state {
+                    GameState::MainMenu => {
+                        if is_pressed {
                             let size = self.window.as_ref().map(|w| w.inner_size()).unwrap_or(PhysicalSize::new(1280, 720));
                             let mut dummy = UiBatch::new();
                             let buttons = MenuRenderer::render_main_menu(&mut dummy, size.width as f32, size.height as f32, (mx, my));
@@ -263,17 +290,45 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        GameState::Playing => {
+                    }
+                    GameState::Playing => {
+                        if is_pressed {
                             if self.cursor_locked {
-                                if let Some(player) = &mut self.player {
-                                    let active_block = self.inventory.selected_block();
-                                    player.handle_mouse_click(button, &mut self.world, active_block);
+                                match button {
+                                    MouseButton::Left => {
+                                        self.is_lmb_down = true;
+                                        if self.game_mode == GameMode::Creative {
+                                            // Instant break in creative
+                                            if let Some(player) = &mut self.player {
+                                                player.handle_instant_break(&mut self.world);
+                                            }
+                                        }
+                                    }
+                                    MouseButton::Right => {
+                                        // Place block
+                                        let is_creative = self.game_mode == GameMode::Creative;
+                                        if self.inventory.can_place_selected(is_creative) {
+                                            let block = self.inventory.selected_block();
+                                            if let Some(player) = &mut self.player {
+                                                if player.try_place_block(&mut self.world, block) {
+                                                    self.inventory.consume_selected(is_creative);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    _ => (),
                                 }
                             } else if button == MouseButton::Left {
                                 self.lock_cursor(true);
                             }
+                        } else if button == MouseButton::Left {
+                            self.is_lmb_down = false;
+                            self.breaking_block = None;
+                            self.break_progress = 0.0;
                         }
-                        GameState::Inventory => {
+                    }
+                    GameState::Inventory => {
+                        if is_pressed {
                             let size = self.window.as_ref().map(|w| w.inner_size()).unwrap_or(PhysicalSize::new(1280, 720));
                             let mut dummy = UiBatch::new();
                             let (palette_hit, hotbar_hit) = MenuRenderer::render_inventory(
@@ -281,17 +336,22 @@ impl ApplicationHandler for App {
                                 size.width as f32,
                                 size.height as f32,
                                 &self.inventory,
+                                self.game_mode,
                                 (mx, my),
                             );
 
                             if let Some(pal_idx) = palette_hit {
                                 let block = Inventory::PALETTE[pal_idx];
-                                self.inventory.set_slot(self.inventory.selected_slot, block);
+                                if self.game_mode == GameMode::Creative {
+                                    self.inventory.set_slot(self.inventory.selected_slot, block, 64);
+                                }
                             } else if let Some(hb_idx) = hotbar_hit {
                                 self.inventory.select_slot(hb_idx);
                             }
                         }
-                        GameState::PauseMenu => {
+                    }
+                    GameState::PauseMenu => {
+                        if is_pressed {
                             let size = self.window.as_ref().map(|w| w.inner_size()).unwrap_or(PhysicalSize::new(1280, 720));
                             let mut dummy = UiBatch::new();
                             let buttons = MenuRenderer::render_pause_menu(
@@ -314,6 +374,9 @@ impl ApplicationHandler for App {
                                                 GameMode::Survival => GameMode::Creative,
                                                 GameMode::Creative => GameMode::Survival,
                                             };
+                                            if self.game_mode == GameMode::Creative {
+                                                self.inventory = Inventory::new_creative();
+                                            }
                                             if let Some(player) = &mut self.player {
                                                 player.is_flying = self.game_mode == GameMode::Creative;
                                             }
@@ -329,7 +392,9 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        GameState::Settings { from_main_menu } => {
+                    }
+                    GameState::Settings { from_main_menu } => {
+                        if is_pressed {
                             let size = self.window.as_ref().map(|w| w.inner_size()).unwrap_or(PhysicalSize::new(1280, 720));
                             let mut dummy = UiBatch::new();
                             let buttons = MenuRenderer::render_settings_menu(
@@ -393,7 +458,9 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        GameState::GameOver => {
+                    }
+                    GameState::GameOver => {
+                        if is_pressed {
                             let size = self.window.as_ref().map(|w| w.inner_size()).unwrap_or(PhysicalSize::new(1280, 720));
                             let mut dummy = UiBatch::new();
                             let buttons = MenuRenderer::render_game_over(
@@ -461,12 +528,62 @@ impl ApplicationHandler for App {
 
                     if should_game_over {
                         self.game_state = GameState::GameOver;
+                        self.is_lmb_down = false;
+                        self.breaking_block = None;
+                        self.break_progress = 0.0;
                         self.lock_cursor(false);
                     } else if let Some(chunk) = current_chunk {
                         if self.last_player_chunk != Some(chunk) {
                             self.world.generate_chunks_around(chunk, self.settings.render_distance);
                             self.last_player_chunk = Some(chunk);
                         }
+                    }
+
+                    // Update dropped items
+                    let p_pos = self.player.as_ref().map(|p| p.camera.position).unwrap_or(Vec3::ZERO);
+                    self.dropped_items.update(&self.world, p_pos, &mut self.inventory, dt);
+
+                    // Survival block breaking loop
+                    if self.is_lmb_down && self.game_mode == GameMode::Survival && self.cursor_locked {
+                        if let Some(player) = &mut self.player {
+                            let origin = player.camera.position;
+                            let dir = player.camera.front();
+                            if let Some(hit) = crate::player::raycast::raycast_voxels(origin, dir, 6.0, &self.world) {
+                                let (bx, by, bz) = hit.block_pos;
+                                let target_block = self.world.get_block(bx, by, bz);
+
+                                if target_block != crate::voxel::block::BlockType::Air {
+                                    if self.breaking_block == Some((bx, by, bz)) {
+                                        let break_time = target_block.break_time();
+                                        if break_time.is_finite() {
+                                            self.break_progress += dt / break_time;
+                                            if self.break_progress >= 1.0 {
+                                                // Destroy block!
+                                                self.world.set_block(bx, by, bz, crate::voxel::block::BlockType::Air);
+                                                if let Some(drop) = target_block.drop_item() {
+                                                    let drop_pos = Vec3::new(bx as f32 + 0.5, by as f32 + 0.5, bz as f32 + 0.5);
+                                                    self.dropped_items.spawn(drop, drop_pos);
+                                                }
+                                                self.breaking_block = None;
+                                                self.break_progress = 0.0;
+                                            }
+                                        }
+                                    } else {
+                                        self.breaking_block = Some((bx, by, bz));
+                                        self.break_progress = 0.0;
+                                    }
+                                } else {
+                                    self.breaking_block = None;
+                                    self.break_progress = 0.0;
+                                }
+                            } else {
+                                self.breaking_block = None;
+                                self.break_progress = 0.0;
+                            }
+                        }
+                    } else if self.game_mode == GameMode::Survival {
+                        self.breaking_block = None;
+                        self.break_progress = 0.0;
                     }
                 }
 
@@ -496,6 +613,8 @@ impl ApplicationHandler for App {
                                 &self.survival,
                                 self.fps,
                                 player.camera.position,
+                                self.break_progress,
+                                player.is_crouching,
                             );
                         }
                     }
@@ -505,6 +624,7 @@ impl ApplicationHandler for App {
                             win_w,
                             win_h,
                             &self.inventory,
+                            self.game_mode,
                             self.mouse_pos,
                         );
                     }
@@ -544,12 +664,14 @@ impl ApplicationHandler for App {
                     if let Some(player) = &self.player {
                         let render_3d = self.world_generated && self.game_state != GameState::MainMenu;
                         let view_dist_blocks = (self.settings.render_distance * 16) as f32;
+                        let item_mesh = self.dropped_items.generate_mesh();
 
                         match renderer.render(
                             &player.camera,
                             view_dist_blocks,
                             self.settings.fog_enabled,
                             render_3d,
+                            &item_mesh,
                             &self.ui_batch,
                         ) {
                             Ok(_) => {}
